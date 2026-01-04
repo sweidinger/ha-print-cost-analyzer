@@ -109,17 +109,73 @@ Fields:
 
 ### Häufige Probleme
 
-1. **Spoolman-Verbindung fehlgeschlagen**
+1. **"Invalid integration version" nach Installation**
+   - **Ursache**: Home Assistant wurde nicht neugestartet nach der Installation
+   - **Lösung**: Home Assistant **neustarten** (siehe unten)
+
+2. **"Component not found" oder "Integration not found"**
+   - **Ursache**: Cache-Problem oder inkorrekte Installation
+   - **Lösung**: 
+     1. Home Assistant neustarten
+     2. Custom Components Cache löschen
+     3. Integration neu installieren
+
+3. **Spoolman-Verbindung fehlgeschlagen**
    - URL und Token überprüfen
    - Spoolman-Status prüfen
 
-2. **Shelly Entities nicht gefunden**
+4. **Shelly Entities nicht gefunden**
    - Entity-IDs in HomeAssistant überprüfen
    - Shelly-Konfiguration prüfen
 
-3. **InfluxDB-Fehler**
+5. **InfluxDB-Fehler**
    - Verbindungsdaten überprüfen
    - Bucket-Berechtigungen prüfen
+
+### 🔧 Home Assistant Neustart nach Custom Component Installation
+
+**WICHTIG**: Nach jeder Änderung an Custom Components ist ein Neustart erforderlich!
+
+#### Methode 1: UI Neustart
+1. Home Assistant → Developer → Restart
+2. Auf "Restart Home Assistant" klicken
+
+#### Methode 2: Kommandozeile
+```bash
+# Docker
+docker restart homeassistant
+
+# Systemdienst
+sudo systemctl restart home-assistant
+```
+
+#### Methode 3: Entwickler-Tools
+```bash
+# Cache löschen
+rm -rf /config/.storage/core.config_entries
+rm -rf /config/custom_components/.cache
+
+# Manuell
+http://your-homeassistant-url:8123/developer_tools/reload
+```
+
+### 📁 Manuelle Installation bei Problemen
+
+Wenn die Installation nicht funktioniert:
+
+1. **Backup erstellen**
+   ```bash
+   cp -r /config/custom_components /config/custom_components_backup
+   ```
+
+2. **Alt löschen**
+   ```bash
+   rm -rf /config/custom_components/print_cost_analyzer
+   ```
+
+3. **Neu installieren**
+   - Dateien aus `/config/custom_components/print_cost_analyzer/` kopieren
+   - Home Assistant neustarten
 
 ## 🤝 Beiträge
 

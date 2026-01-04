@@ -43,6 +43,8 @@ _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS = [Platform.SENSOR, Platform.BUTTON]
 
+__version__ = "1.0.1"
+
 
 class PrintCostCoordinator(DataUpdateCoordinator):
     """Class to manage fetching data from the APIs."""
@@ -81,12 +83,17 @@ class PrintCostCoordinator(DataUpdateCoordinator):
 
     async def _async_setup(self) -> None:
         """Set up the coordinator."""
-        # Initialize InfluxDB client
-        self.influxdb_client = InfluxDBClient(
-            url=self.influxdb_url,
-            token=self.influxdb_token,
-            org=self.influxdb_org,
-        )
+        try:
+            # Initialize InfluxDB client
+            self.influxdb_client = InfluxDBClient(
+                url=self.influxdb_url,
+                token=self.influxdb_token,
+                org=self.influxdb_org,
+            )
+            _LOGGER.info("InfluxDB client initialized successfully")
+        except Exception as e:
+            _LOGGER.error("Failed to initialize InfluxDB client: %s", e)
+            raise
 
     async def _async_update_data(self) -> Dict[str, Any]:
         """Update data via library."""
@@ -150,6 +157,7 @@ class PrintCostCoordinator(DataUpdateCoordinator):
                         "unit": state.attributes.get("unit_of_measurement", "W"),
                         "timestamp": datetime.now().isoformat(),
                     }
+                    _LOGGER.debug("Fetched power data for %s", entity_id)
             except Exception as e:
                 _LOGGER.error("Failed to fetch power entity %s: %s", entity_id, e)
 
@@ -164,6 +172,7 @@ class PrintCostCoordinator(DataUpdateCoordinator):
                         "unit": state.attributes.get("unit_of_measurement", "kWh"),
                         "timestamp": datetime.now().isoformat(),
                     }
+                    _LOGGER.debug("Fetched energy data for %s", entity_id)
             except Exception as e:
                 _LOGGER.error("Failed to fetch energy entity %s: %s", entity_id, e)
 
@@ -178,6 +187,7 @@ class PrintCostCoordinator(DataUpdateCoordinator):
                         "attributes": state.attributes,
                         "timestamp": datetime.now().isoformat(),
                     }
+                    _LOGGER.debug("Fetched AMS data for %s", entity_id)
             except Exception as e:
                 _LOGGER.error("Failed to fetch AMS entity %s: %s", entity_id, e)
 
@@ -222,6 +232,7 @@ class PrintCostCoordinator(DataUpdateCoordinator):
                         "energy_consumed": record.values.get("energy_consumed"),
                         "spool_id": record.values.get("spool_id"),
                     })
+            _LOGGER.debug("Fetched %d print jobs from InfluxDB", len(self.print_history))
         except Exception as e:
             _LOGGER.error("Failed to query InfluxDB: %s", e)
 
@@ -269,6 +280,7 @@ class PrintCostCoordinator(DataUpdateCoordinator):
     ) -> None:
         """Add a new print job to the database."""
         if not self.influxdb_client:
+            _LOGGER.error("InfluxDB client not initialized")
             return
 
         write_api = self.influxdb_client.write_api(write_options=SYNCHRONOUS)
@@ -290,6 +302,8 @@ class PrintCostCoordinator(DataUpdateCoordinator):
         try:
             write_api.write(bucket=self.influxdb_bucket, record=point)
             _LOGGER.info("Added print job for printer %s", printer_name)
+            # Trigger an update to refresh the data
+            await self.async_request_refresh()
         except Exception as e:
             _LOGGER.error("Failed to write print job to InfluxDB: %s", e)
 
@@ -297,6 +311,7 @@ class PrintCostCoordinator(DataUpdateCoordinator):
         """Unload resources."""
         if self.influxdb_client:
             self.influxdb_client.close()
+            _LOGGER.info("InfluxDB client closed")
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -308,7 +323,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data[DOMAIN][entry.entry_id] = coordinator
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-
     return True
 
 
