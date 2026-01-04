@@ -1,0 +1,12 @@
+{
+  "domain": "print_cost_analyzer",
+  "name": "3D Print Cost Analyzer",
+  "version": "1.0.0",
+  "documentation": "https://github.com/your-username/ha-print-cost-analyzer",
+  "issue_tracker": "https://github.com/your-username/ha-print-cost-analyzer/issues",
+  "dependencies": [],
+  "codeowners": ["@your-username"],
+  "requirements": ["aiohttp>=3.8.0", "influxdb-client>=1.38.0"],
+  "config_flow": true,
+  "iot_class": "local_polling"
+}

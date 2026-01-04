@@ -1,0 +1,118 @@
+# Example Lovelace Dashboard for 3D Print Cost Analyzer
+
+type: vertical-stack
+cards:
+  # Header Card
+  - type: markdown
+    content: |
+      # 3D Druck Kostenübersicht
+      *Echtzeitüberwachung Ihrer 3D-Druckkosten*
+    card_mod:
+      style: |
+        ha-card {
+          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          color: white;
+          border-radius: 15px;
+        }
+
+  # Total Cost Overview
+  - type: entities
+    title: Gesamtkosten
+    show_header_toggle: false
+    entities:
+      - entity: sensor.total_print_cost
+        name: Gesamtkosten aller Drucke
+        icon: mdi:currency-eur
+      - entity: sensor.total_prints
+        name: Anzahl Drucke
+        icon: mdi:printer-3d
+      - entity: sensor.active_spools
+        name: Aktive Spools
+        icon: mdi:database
+
+  # Energy Monitoring
+  - type: entities
+    title: Energieüberwachung
+    show_header_toggle: false
+    entities:
+      - entity: sensor.shelly_ender3_power
+        name: Ender3 - Aktuelle Leistung
+        icon: mdi:flash
+      - entity: sensor.shelly_ender3_energy
+        name: Ender3 - Gesamtverbrauch
+        icon: mdi:lightning-bolt
+
+  # Recent Prints
+  - type: history-graph
+    title: Letzte Drucke
+    hours_to_show: 168
+    refresh_interval: 60
+    entities:
+      - entity: sensor.total_print_cost
+        name: Gesamtkosten
+
+  # Cost Breakdown Chart
+  - type: custom:apexcharts-card
+    header:
+      title: Kostenentwicklung
+      show: true
+    graph_span: 30d
+    series:
+      - entity: sensor.total_print_cost
+        name: Gesamtkosten
+        type: column
+        color: '#667eea'
+
+  # Material Usage
+  - type: custom:bar-card
+    title: Materialverbrauch
+    entities:
+      - entity: sensor.active_spools
+        name: Aktive Spools
+        icon: mdi:database
+    positions:
+      icon: inside
+      name: inside
+    card_mod:
+      style: |
+        bar-card {
+          --bar-card-background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          color: white;
+        }
+
+  # Quick Actions
+  - type: entities
+    title: Schnellaktionen
+    show_header_toggle: false
+    entities:
+      - entity: button.add_print_job
+        name: Druckaufnahme hinzufügen
+        icon: mdi:plus-circle
+        tap_action:
+          action: call-service
+          service: print_cost_analyzer.add_print_job
+          service_data:
+            printer: "Ender3"
+            duration: 3600
+            material_used: 25.5
+            spool_id: "123"
+            energy_consumed: 0.15
+
+  # Statistics
+  - type: statistics-graph
+    title: Kostenstatistiken
+    chart_type: line
+    period: month
+    stat_types:
+      - mean
+      - max
+    entities:
+      - sensor.total_print_cost
+
+  # Energy Cost Calculator
+  - type: custom:button-card
+    template: card_energy_cost
+    variables:
+      entity: sensor.shelly_ender3_energy
+      cost_per_kwh: 0.30
+      name: Ender3 Energiekosten

@@ -1,0 +1,79 @@
+"""Strings for the Print Cost Analyzer integration."""
+from __future__ import annotations
+
+from homeassistant.helpers.entity import EntityDescription
+from homeassistant.helpers.entity_component import EntityComponent
+
+from .const import DOMAIN
+
+
+class PrintCostAnalyzerStrings:
+    """Strings for the Print Cost Analyzer integration."""
+
+    # Config flow
+    CONFIG_FLOW_TITLE = "3D Print Cost Analyzer"
+    CONFIG_FLOW_DESCRIPTION = "Configure your 3D print cost analyzer with Spoolman, Shelly plugs, and InfluxDB."
+
+    # Step descriptions
+    STEP_USER_DESCRIPTION = "Enter your Spoolman and InfluxDB configuration details."
+    STEP_SHELLY_PLUGS_DESCRIPTION = "Configure your Shelly plugs for energy monitoring."
+
+    # Form fields
+    FIELD_SPOOLMAN_URL = "Spoolman URL"
+    FIELD_SPOOLMAN_TOKEN = "Spoolman Token (optional)"
+    FIELD_INFLUXDB_URL = "InfluxDB URL"
+    FIELD_INFLUXDB_TOKEN = "InfluxDB Token"
+    FIELD_INFLUXDB_ORG = "InfluxDB Organization"
+    FIELD_INFLUXDB_BUCKET = "InfluxDB Bucket"
+    FIELD_ENERGY_COST_PER_KWH = "Energy Cost per kWh (€)"
+
+    # Buttons
+    BUTTON_ADD_PLUG = "Add Plug"
+    BUTTON_FINISH = "Finish Configuration"
+
+    # Sensors
+    SENSOR_TOTAL_COST = "Total Print Cost"
+    SENSOR_ACTIVE_SPOOLS = "Active Spools"
+    SENSOR_TOTAL_PRINTS = "Total Prints"
+    SENSOR_SHELLY_POWER = "Shelly {name} Power"
+    SENSOR_SHELLY_ENERGY = "Shelly {name} Energy"
+
+    # Services
+    SERVICE_ADD_PRINT_JOB = "Add Print Job"
+    SERVICE_ADD_PRINT_JOB_DESCRIPTION = "Add a new print job to the cost analyzer"
+
+    # Errors
+    ERROR_CANNOT_CONNECT = "Cannot connect to the specified services. Please check your configuration."
+    ERROR_INVALID_AUTH = "Invalid authentication. Please check your tokens and credentials."
+
+
+# This is a placeholder for translations
+# In a real integration, you would create proper translation files
+def get_translations() -> dict:
+    """Return translation strings."""
+    return {
+        "config": {
+            "step": {
+                "user": {
+                    "title": PrintCostAnalyzerStrings.CONFIG_FLOW_TITLE,
+                    "description": PrintCostAnalyzerStrings.STEP_USER_DESCRIPTION,
+                },
+                "shelly_plugs": {
+                    "title": PrintCostAnalyzerStrings.CONFIG_FLOW_TITLE,
+                    "description": PrintCostAnalyzerStrings.STEP_SHELLY_PLUGS_DESCRIPTION,
+                },
+            },
+            "error": {
+                "cannot_connect": PrintCostAnalyzerStrings.ERROR_CANNOT_CONNECT,
+                "invalid_auth": PrintCostAnalyzerStrings.ERROR_INVALID_AUTH,
+            },
+        },
+        "options": {
+            "step": {
+                "init": {
+                    "title": PrintCostAnalyzerStrings.CONFIG_FLOW_TITLE,
+                    "description": PrintCostAnalyzerStrings.STEP_USER_DESCRIPTION,
+                },
+            },
+        },
+    }
