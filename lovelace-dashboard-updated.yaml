@@ -1,0 +1,169 @@
+# Aktualisierte Lovelace Dashboard für 3D Print Cost Analyzer
+
+type: vertical-stack
+cards:
+  # Header Card
+  - type: markdown
+    content: |
+      # 3D Druck Kostenübersicht
+      *Echtzeitüberwachung Ihrer 3D-Druckkosten mit Entity-Integration*
+    card_mod:
+      style: |
+        ha-card {
+          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          color: white;
+          border-radius: 15px;
+        }
+
+  # Total Cost Overview
+  - type: entities
+    title: Gesamtkosten
+    show_header_toggle: false
+    entities:
+      - entity: sensor.total_print_cost
+        name: Gesamtkosten aller Drucke
+        icon: mdi:currency-eur
+      - entity: sensor.total_prints
+        name: Anzahl Drucke
+        icon: mdi:printer-3d
+      - entity: sensor.active_spools
+        name: Aktive Spools
+        icon: mdi:database
+      - entity: sensor.energy_cost_per_kwh
+        name: Aktueller Strompreis
+        icon: mdi:flash
+
+  # Energy Monitoring mit Entity-Integration
+  - type: entities
+    title: Energieüberwachung (Shelly Entities)
+    show_header_toggle: false
+    entities:
+      # Shelly Power Entities werden automatisch hinzugefügt
+      - entity: sensor.shelly_shellyplug_s_power
+        name: Shelly Plug - Aktuelle Leistung
+        icon: mdi:flash
+      - entity: sensor.shelly_shellyplug_s_energy
+        name: Shelly Plug - Gesamtverbrauch
+        icon: mdi:lightning-bolt
+
+  # AMS Units
+  - type: entities
+    title: AMS-Units & Material
+    show_header_toggle: false
+    entities:
+      # AMS Entities werden automatisch hinzugefügt
+      - entity: sensor.ams_ams_slot1_filament
+        name: AMS Slot 1 - Filament
+        icon: mdi:printer-3d-nozzle
+      - entity: sensor.ams_ams_slot2_filament
+        name: AMS Slot 2 - Filament
+        icon: mdi:printer-3d-nozzle
+      - entity: sensor.ams_ams_slot3_filament
+        name: AMS Slot 3 - Filament
+        icon: mdi:printer-3d-nozzle
+      - entity: sensor.ams_ams_slot4_filament
+        name: AMS Slot 4 - Filament
+        icon: mdi:printer-3d-nozzle
+
+  # Recent Prints mit Spoolman-Daten
+  - type: history-graph
+    title: Letzte Drucke (Material & Energie)
+    hours_to_show: 168
+    refresh_interval: 60
+    entities:
+      - entity: sensor.total_print_cost
+        name: Gesamtkosten
+      - entity: sensor.energy_cost_per_kwh
+        name: Strompreis
+
+  # Cost Breakdown Chart
+  - type: custom:apexcharts-card
+    header:
+      title: Kostenentwicklung (30 Tage)
+      show: true
+    graph_span: 30d
+    series:
+      - entity: sensor.total_print_cost
+        name: Gesamtkosten
+        type: column
+        color: '#667eea'
+      - entity: sensor.energy_cost_per_kwh
+        name: Strompreis
+        type: line
+        color: '#ff6b6b'
+
+  # Material Usage from Spoolman
+  - type: custom:bar-card
+    title: Materialverbrauch (Spoolman)
+    entities:
+      - entity: sensor.active_spools
+        name: Aktive Spools
+        icon: mdi:database
+    positions:
+      icon: inside
+      name: inside
+    card_mod:
+      style: |
+        bar-card {
+          --bar-card-background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          color: white;
+        }
+
+  # Quick Actions
+  - type: entities
+    title: Schnellaktionen
+    show_header_toggle: false
+    entities:
+      - entity: button.add_print_job
+        name: Druckaufnahme hinzufügen
+        icon: mdi:plus-circle
+        tap_action:
+          action: call-service
+          service: print_cost_analyzer.add_print_job
+          service_data:
+            printer: "Ender3"
+            duration: 3600
+            material_used: 25.5
+            spool_id: "123"
+            energy_consumed: 0.15
+
+  # Energy Cost Calculator (mit Entity-Unterstützung)
+  - type: custom:button-card
+    template: card_energy_cost
+    variables:
+      entity: sensor.shelly_shellyplug_s_energy
+      cost_entity: sensor.energy_cost_per_kwh
+      name: Ender3 Energiekosten
+
+  # Statistics
+  - type: statistics-graph
+    title: Kostenstatistiken
+    chart_type: line
+    period: month
+    stat_types:
+      - mean
+      - max
+    entities:
+      - sensor.total_print_cost
+      - sensor.energy_cost_per_kwh
+
+  # Spoolman Integration Status
+  - type: entities
+    title: Spoolman Status
+    show_header_toggle: false
+    entities:
+      - entity: sensor.active_spools
+        name: Verbundene Spools
+        icon: mdi:database
+      - entity: sensor.total_prints
+        name: Drucke mit Material tracking
+        icon: mdi:printer-3d
+
+  # Energy Source Configuration
+  - type: markdown
+    content: |
+      ## Energiekosten-Quelle
+      - **Fixer Preis**: 0.30€/kWh
+      - **Entity**: `sensor.energy_cost_per_kwh` (dynamisch)
+      
+      *Wechseln Sie die Quelle in den Integrationseinstellungen*

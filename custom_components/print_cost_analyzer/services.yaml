@@ -1,0 +1,40 @@
+add_print_job:
+  name: Add Print Job
+  description: Add a new print job to the cost analyzer
+  fields:
+    printer:
+      name: Printer
+      description: Name of the printer used
+      required: true
+      selector:
+        text:
+    duration:
+      name: Duration
+      description: Print duration in seconds
+      required: true
+      selector:
+        number:
+          min: 0
+          unit_of_measurement: seconds
+    material_used:
+      name: Material Used
+      description: Amount of material used in grams
+      required: true
+      selector:
+        number:
+          min: 0
+          unit_of_measurement: grams
+    spool_id:
+      name: Spool ID
+      description: ID of the spool used
+      required: true
+      selector:
+        text:
+    energy_consumed:
+      name: Energy Consumed
+      description: Energy consumed in kWh
+      required: true
+      selector:
+        number:
+          min: 0
+          unit_of_measurement: kWh
