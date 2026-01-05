@@ -1,0 +1,23 @@
+# pyproject.toml for ha-print-cost-analyzer
+
+[tool.poetry]
+name = "ha-print-cost-analyzer"
+version = "0.1.2" # Use a semantic version (e.g., 1.0.0)
+description = "A custom component for Home Assistant to analyze 3D print costs."
+authors = ["sweidinger"]
+readme = "README.md"
+packages = [{include = "ha_print_cost_analyzer"}]
+
+[tool.poetry.dependencies]
+python = "^3.9"
+homeassistant = "^2024.*" # Adjust to match your Home Assistant version
+
+[tool.poetry.dev-dependencies]
+hacs = "^2024.*" # Adjust to match your HACS version
+
+[tool.hacs]
+type = "custom_component"
+category = "3D Printing"
+
+# Optional: Provide a link to the repository
+repository-url = "https://github.com/sweidinger/ha-print-cost-analyzer.git"
