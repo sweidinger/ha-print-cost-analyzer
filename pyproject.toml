@@ -17,7 +17,8 @@ hacs = "^2024.*" # Adjust to match your HACS version
 
 [tool.hacs]
 type = "custom_component"
-category = "3D Printing"
+name = "ha_print_cost_analyzer" # This should match the repository name
+version = "0.1.0"
 
 # Optional: Provide a link to the repository
 repository-url = "https://github.com/sweidinger/ha-print-cost-analyzer.git"
