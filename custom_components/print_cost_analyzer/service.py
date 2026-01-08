@@ -43,7 +43,7 @@ async def async_setup_services(hass: HomeAssistant) -> None:
         )
 
         # Find the coordinator and add the print job
-        for entry_id, coordinator in hass.data[DOMAIN].items():
+        for coordinator in hass.data[DOMAIN].get("entries", {}).values():
             await coordinator.async_add_print_job(
                 printer, duration, material_used, spool_id, energy_consumed
             )

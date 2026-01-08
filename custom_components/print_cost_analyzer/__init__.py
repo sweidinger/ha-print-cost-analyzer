@@ -10,21 +10,20 @@ from influxdb_client.client.write_api import SYNCHRONOUS
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
-    CONF_URL,
-    CONF_USERNAME,
-    CONF_PASSWORD,
-    CONF_TOKEN,
     CONF_NAME,
     Platform,
 )
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity import DeviceInfo
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import (
     DOMAIN,
+    GLOBAL_CONFIG_STORAGE_KEY,
+    GLOBAL_CONFIG_STORAGE_VERSION,
     CONF_SPOOLMAN_URL,
     CONF_SPOOLMAN_TOKEN,
+    CONF_SPOOLMAN_SPOOL_IDS,
     CONF_SHELLY_POWER_ENTITIES,
     CONF_SHELLY_ENERGY_ENTITIES,
     CONF_AMS_ENTITIES,
@@ -38,35 +37,41 @@ from .const import (
     DEFAULT_ENERGY_COST_PER_KWH,
     SCAN_INTERVAL,
 )
+from .service import async_setup_services
 
 _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS = [Platform.SENSOR, Platform.BUTTON]
 
-__version__ = "2024.8.3"
+__version__ = "2024.8.4"
 
 
 class PrintCostCoordinator(DataUpdateCoordinator):
     """Class to manage fetching data from the APIs."""
 
-    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry, global_config: Dict[str, Any]) -> None:
         """Initialize."""
         self.hass = hass
         self.entry = entry
-        self.spoolman_url = entry.data[CONF_SPOOLMAN_URL]
-        self.spoolman_token = entry.data.get(CONF_SPOOLMAN_TOKEN)
+        self.printer_name = entry.data.get(CONF_NAME) or entry.title
+        self.spoolman_spool_ids = entry.data.get(CONF_SPOOLMAN_SPOOL_IDS, [])
         self.shelly_power_entities = entry.data.get(CONF_SHELLY_POWER_ENTITIES, [])
         self.shelly_energy_entities = entry.data.get(CONF_SHELLY_ENERGY_ENTITIES, [])
         self.ams_entities = entry.data.get(CONF_AMS_ENTITIES, [])
-        self.influxdb_url = entry.data[CONF_INFLUXDB_URL]
-        self.influxdb_token = entry.data[CONF_INFLUXDB_TOKEN]
-        self.influxdb_org = entry.data[CONF_INFLUXDB_ORG]
-        self.influxdb_bucket = entry.data[CONF_INFLUXDB_BUCKET]
-        self.energy_cost_source = entry.data.get(CONF_ENERGY_COST_SOURCE, "fixed")
-        self.energy_cost_per_kwh = entry.data.get(
-            CONF_ENERGY_COST_PER_KWH, DEFAULT_ENERGY_COST_PER_KWH
+        self.spoolman_url = global_config.get(CONF_SPOOLMAN_URL, entry.data.get(CONF_SPOOLMAN_URL))
+        self.spoolman_token = global_config.get(CONF_SPOOLMAN_TOKEN, entry.data.get(CONF_SPOOLMAN_TOKEN))
+        self.influxdb_url = global_config.get(CONF_INFLUXDB_URL, entry.data.get(CONF_INFLUXDB_URL))
+        self.influxdb_token = global_config.get(CONF_INFLUXDB_TOKEN, entry.data.get(CONF_INFLUXDB_TOKEN))
+        self.influxdb_org = global_config.get(CONF_INFLUXDB_ORG, entry.data.get(CONF_INFLUXDB_ORG))
+        self.influxdb_bucket = global_config.get(CONF_INFLUXDB_BUCKET, entry.data.get(CONF_INFLUXDB_BUCKET))
+        self.energy_cost_source = global_config.get(
+            CONF_ENERGY_COST_SOURCE, entry.data.get(CONF_ENERGY_COST_SOURCE, "fixed")
         )
-        self.energy_cost_entity = entry.data.get(CONF_ENERGY_COST_ENTITY)
+        self.energy_cost_per_kwh = global_config.get(
+            CONF_ENERGY_COST_PER_KWH,
+            entry.data.get(CONF_ENERGY_COST_PER_KWH, DEFAULT_ENERGY_COST_PER_KWH),
+        )
+        self.energy_cost_entity = global_config.get(CONF_ENERGY_COST_ENTITY, entry.data.get(CONF_ENERGY_COST_ENTITY))
 
         self.influxdb_client: Optional[InfluxDBClient] = None
         self.spool_data: Dict[str, Any] = {}
@@ -133,11 +138,19 @@ class PrintCostCoordinator(DataUpdateCoordinator):
                 ) as response:
                     if response.status == 200:
                         data = await response.json()
-                        self.spool_data = {
+                        spools = {
                             str(spool["id"]): spool
                             for spool in data
                             if spool.get("active", True)
                         }
+                        if self.spoolman_spool_ids:
+                            self.spool_data = {
+                                spool_id: spools[spool_id]
+                                for spool_id in self.spoolman_spool_ids
+                                if spool_id in spools
+                            }
+                        else:
+                            self.spool_data = spools
                         _LOGGER.debug("Fetched %d active spools from Spoolman", len(self.spool_data))
                     else:
                         _LOGGER.error("Failed to fetch Spoolman data: %s", response.status)
@@ -215,8 +228,10 @@ class PrintCostCoordinator(DataUpdateCoordinator):
         from(bucket: "{self.influxdb_bucket}")
         |> range(start: -30d)
         |> filter(fn: (r) => r["_measurement"] == "print_job")
-        |> sort(columns: ["_time"], desc: true)
         '''
+        if self.printer_name:
+            query += f'|> filter(fn: (r) => r["printer"] == "{self.printer_name}")\n'
+        query += '|> sort(columns: ["_time"], desc: true)\n'
         
         try:
             result = query_api.query(query)
@@ -246,8 +261,9 @@ class PrintCostCoordinator(DataUpdateCoordinator):
             
             # Calculate material cost using Spoolman data
             spool_id = print_job.get("spool_id")
-            if spool_id and spool_id in self.spool_data:
-                spool = self.spool_data[spool_id]
+            spool_id_str = str(spool_id) if spool_id is not None else None
+            if spool_id_str and spool_id_str in self.spool_data:
+                spool = self.spool_data[spool_id_str]
                 material_used_g = print_job.get("material_used", 0)
                 # Use price_per_kg from Spoolman if available, otherwise fallback to price
                 price_per_kg = spool.get("price_per_kg")
@@ -316,11 +332,19 @@ class PrintCostCoordinator(DataUpdateCoordinator):
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Print Cost Analyzer from a config entry."""
-    coordinator = PrintCostCoordinator(hass, entry)
+    hass.data.setdefault(DOMAIN, {})
+    store: Store = hass.data[DOMAIN].get(
+        "store", Store(hass, GLOBAL_CONFIG_STORAGE_VERSION, GLOBAL_CONFIG_STORAGE_KEY)
+    )
+    hass.data[DOMAIN]["store"] = store
+    global_config = await store.async_load() or {}
+    hass.data[DOMAIN]["global"] = global_config
+
+    coordinator = PrintCostCoordinator(hass, entry, global_config)
     await coordinator._async_setup()
 
-    hass.data.setdefault(DOMAIN, {})
-    hass.data[DOMAIN][entry.entry_id] = coordinator
+    hass.data[DOMAIN].setdefault("entries", {})
+    hass.data[DOMAIN]["entries"][entry.entry_id] = coordinator
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
@@ -329,8 +353,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
-        coordinator = hass.data[DOMAIN][entry.entry_id]
+        coordinator = hass.data[DOMAIN]["entries"][entry.entry_id]
         await coordinator.async_unload()
-        hass.data[DOMAIN].pop(entry.entry_id)
+        hass.data[DOMAIN]["entries"].pop(entry.entry_id)
 
     return unload_ok
+
+
+async def async_setup(hass: HomeAssistant, config: Dict[str, Any]) -> bool:
+    """Set up the integration."""
+    hass.data.setdefault(DOMAIN, {})
+    store = Store(hass, GLOBAL_CONFIG_STORAGE_VERSION, GLOBAL_CONFIG_STORAGE_KEY)
+    hass.data[DOMAIN]["store"] = store
+    hass.data[DOMAIN]["global"] = await store.async_load() or {}
+    hass.data[DOMAIN].setdefault("entries", {})
+    await async_setup_services(hass)
+    return True

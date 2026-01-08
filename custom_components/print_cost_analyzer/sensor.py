@@ -1,6 +1,6 @@
 """Sensor platform for Print Cost Analyzer integration."""
 import logging
-from typing import Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -12,7 +12,6 @@ from homeassistant.const import (
     CONF_NAME,
     UnitOfEnergy,
     UnitOfPower,
-    UnitOfCurrency,
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import DeviceInfo
@@ -39,14 +38,15 @@ class PrintCostSensor(CoordinatorEntity, SensorEntity):
         """Initialize the sensor."""
         super().__init__(coordinator)
         self._entry = entry
-        self._attr_name = name
+        printer_name = entry.data.get(CONF_NAME) or entry.title or "3D Print Cost Analyzer"
+        self._attr_name = f"{printer_name} {name}"
         self._attr_unique_id = f"{entry.entry_id}_{unique_id}"
         self._attr_device_class = device_class
         self._attr_state_class = state_class
         self._attr_native_unit_of_measurement = unit
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, entry.entry_id)},
-            name="3D Print Cost Analyzer",
+            name=f"{printer_name} Print Cost Analyzer",
             manufacturer="Custom",
         )
 
@@ -63,7 +63,7 @@ class TotalCostSensor(PrintCostSensor):
             "total_cost",
             SensorDeviceClass.MONETARY,
             SensorStateClass.TOTAL,
-            UnitOfCurrency.EURO,
+            "EUR",
         )
 
     @property
@@ -223,7 +223,7 @@ class EnergyCostSensor(PrintCostSensor):
             "energy_cost_per_kwh",
             SensorDeviceClass.MONETARY,
             SensorStateClass.MEASUREMENT,
-            UnitOfCurrency.EURO,
+            "EUR",
         )
 
     @property
@@ -238,7 +238,7 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities
 ) -> None:
     """Set up Print Cost Analyzer sensors based on a config entry."""
-    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator = hass.data[DOMAIN]["entries"][entry.entry_id]
 
     entities = [
         TotalCostSensor(coordinator, entry),

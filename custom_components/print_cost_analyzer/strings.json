@@ -4,7 +4,7 @@
     "step": {
       "user": {
         "title": "3D Print Cost Analyzer",
-        "description": "Configure Spoolman and InfluxDB for print cost tracking.",
+        "description": "Configure global settings for Spoolman and InfluxDB.",
         "data": {
           "spoolman_url": "Spoolman URL",
           "spoolman_token": "Spoolman token (optional)",
@@ -23,18 +23,14 @@
           "energy_cost_per_kwh": "Energy cost per kWh"
         }
       },
-      "shelly_entities": {
-        "title": "Shelly Entities",
-        "description": "Select Shelly power and energy entities to track.",
+      "printer": {
+        "title": "Printer",
+        "description": "Configure the specific entities for this printer.",
         "data": {
+          "name": "Printer name",
+          "spoolman_spool_ids": "Spoolman spools",
           "shelly_power_entities": "Shelly power entities",
-          "shelly_energy_entities": "Shelly energy entities"
-        }
-      },
-      "ams_entities": {
-        "title": "AMS Entities",
-        "description": "Select AMS or filament-related entities.",
-        "data": {
+          "shelly_energy_entities": "Shelly energy entities",
           "ams_entities": "AMS entities"
         }
       }
@@ -42,6 +38,31 @@
     "error": {
       "cannot_connect": "Cannot connect to the specified services. Please check your configuration.",
       "invalid_auth": "Invalid authentication. Please check your tokens and credentials."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Global Settings",
+        "description": "Update global settings for Spoolman and InfluxDB.",
+        "data": {
+          "spoolman_url": "Spoolman URL",
+          "spoolman_token": "Spoolman token (optional)",
+          "influxdb_url": "InfluxDB URL",
+          "influxdb_token": "InfluxDB token",
+          "influxdb_org": "InfluxDB organization",
+          "influxdb_bucket": "InfluxDB bucket"
+        }
+      },
+      "energy_cost": {
+        "title": "Energy Cost",
+        "description": "Update how the energy price is provided.",
+        "data": {
+          "energy_cost_source": "Energy cost source",
+          "energy_cost_entity": "Energy price entity",
+          "energy_cost_per_kwh": "Energy cost per kWh"
+        }
+      }
     }
   }
 }

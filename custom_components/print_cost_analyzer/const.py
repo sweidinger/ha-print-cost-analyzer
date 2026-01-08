@@ -3,9 +3,15 @@ from homeassistant.const import CONF_URL, CONF_USERNAME, CONF_PASSWORD, CONF_TOK
 
 DOMAIN = "print_cost_analyzer"
 
+# Storage for global config
+GLOBAL_CONFIG_STORAGE_KEY = f"{DOMAIN}_global"
+GLOBAL_CONFIG_STORAGE_VERSION = 1
+
 # Spoolman configuration
 CONF_SPOOLMAN_URL = "spoolman_url"
 CONF_SPOOLMAN_TOKEN = "spoolman_token"
+CONF_SPOOLMAN_SPOOL_IDS = "spoolman_spool_ids"
+
 
 # Shelly Plug configuration
 CONF_SHELLY_POWER_ENTITIES = "shelly_power_entities"
