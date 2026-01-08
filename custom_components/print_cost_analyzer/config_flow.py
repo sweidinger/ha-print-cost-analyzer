@@ -107,8 +107,9 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         # Get available energy price entities
         energy_price_entities = []
-        for entity_id, entity in self.hass.states.async_all():
-            if entity.attributes.get("unit_of_measurement") in [
+        for state in self.hass.states.async_all():
+            entity_id = state.entity_id
+            if state.attributes.get("unit_of_measurement") in [
                 "€/kWh",
                 "EUR/kWh",
                 "€/kW",
@@ -174,11 +175,12 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         shelly_power_entities = []
         shelly_energy_entities = []
         
-        for entity_id, entity in self.hass.states.async_all():
+        for state in self.hass.states.async_all():
+            entity_id = state.entity_id
             if "shelly" in entity_id.lower():
-                if "power" in entity_id.lower() or entity.attributes.get("unit_of_measurement") == "W":
+                if "power" in entity_id.lower() or state.attributes.get("unit_of_measurement") == "W":
                     shelly_power_entities.append(entity_id)
-                elif "energy" in entity_id.lower() or entity.attributes.get("unit_of_measurement") in ["kWh", "Wh"]:
+                elif "energy" in entity_id.lower() or state.attributes.get("unit_of_measurement") in ["kWh", "Wh"]:
                     shelly_energy_entities.append(entity_id)
 
         return self.async_show_form(
@@ -219,7 +221,8 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         # Get available AMS entities
         ams_entities = []
-        for entity_id, entity in self.hass.states.async_all():
+        for state in self.hass.states.async_all():
+            entity_id = state.entity_id
             if "ams" in entity_id.lower() or "filament" in entity_id.lower():
                 ams_entities.append(entity_id)
 
