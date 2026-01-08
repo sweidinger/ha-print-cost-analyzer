@@ -4,11 +4,11 @@
 
 Dieses Problem tritt auf, wenn Home Assistant versucht, eine Custom Component zu laden, die eine **Mindestversion** für Home Assistant 2024.8 oder neuer benötigt.
 
-## ✅ Lösung: Version 2024.8.0
+## ✅ Lösung: Version 2024.8.1
 
-Die Integration **v2024.8.0** ist jetzt veröffentlicht und kompatibel mit Home Assistant 2024.8+!
+Die Integration **v2024.8.1** ist jetzt veröffentlicht und kompatibel mit Home Assistant 2024.8+!
 
-## 🚀 Installation mit v2024.8.0
+## 🚀 Installation mit v2024.8.1
 
 ### Schritt 1: Repository neu laden
 ```bash
@@ -44,7 +44,7 @@ sudo systemctl restart home-assistant
 
 Nach der Installation kannst du die Version überprüfen:
 1. Einstellungen → Integrationen → "3D Print Cost Analyzer"
-2. Version sollte **2024.8.0** anzeigen
+2. Version sollte **2024.8.1** anzeigen
 
 ## 🔧 Troubleshooting
 
@@ -70,7 +70,7 @@ Nach der Installation kannst du die Version überprüfen:
 
 ### ✅ Version-Kompatibilität
 - **homeassistant: ">=2024.8.0"** in Requirements
-- **Manifest-Version**: "2024.8.0" für HA-Kompatibilität
+- **Manifest-Version**: "2024.8.1" für HA-Kompatibilität
 - **Kein Versions-Check**: Entfernt, der HACS-Fehler verursacht hat
 
 ### ✅ Stabile Installation
@@ -81,7 +81,7 @@ Nach der Installation kannst du die Version überprüfen:
 ---
 
 **URL**: https://github.com/sweidinger/ha-print-cost-analyzer  
-**Version**: v2024.8.0 (aktuell)  
+**Version**: v2024.8.1 (aktuell)  
 **Home Assistant**: Erfordert v2024.8.0+  
 
 Die Integration sollte jetzt problemlos mit der neuesten Home Assistant Version funktionieren! 🚀

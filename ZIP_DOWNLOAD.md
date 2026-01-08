@@ -1,4 +1,4 @@
-# 🎉 Direct Download für HACS - Version 2024.8.0
+# 🎉 Direct Download für HACS - Version 2024.8.1
 
 ## ❌ Problem: "Version cannot be used with HACS"
 
@@ -10,11 +10,11 @@ Dieses Problem tritt auf, wenn HACS versucht, eine ältere Integration zu instal
 
 1. **Lade die ZIP-Datei herunter**:
    - Gehe zu: https://github.com/sweidinger/ha-print-cost-analyzer/releases
-   - Klicke auf **"v2024.8.0.zip"**
-   - Oder direkt: https://github.com/sweidinger/ha-print-cost-analyzer/archive/refs/tags/v2024.8.0.zip
+   - Klicke auf **"v2024.8.1.zip"**
+   - Oder direkt: https://github.com/sweidinger/ha-print-cost-analyzer/archive/refs/tags/v2024.8.1.zip
 
 2. **Entpacke die ZIP-Datei**:
-   - Entpacke `v2024.8.0.zip`
+   - Entpacke `v2024.8.1.zip`
    - Du findest den Ordner `ha-print-cost-analyzer-master/`
 
 3. **Installation**:
@@ -36,7 +36,7 @@ Wenn du HACS trotzdem verwenden willst:
 ## 🔧 Was wurde verbessert
 
 ### ✅ ZIP-Download aktiviert
-- **repository.json** mit `"zip_release": true`
+- **repository.json** mit `"zip_release": false`
 - **homeassistant**: "2024.8.0" für Kompatibilität
 - **Direct Download**: Umgehung von HACS-Version-Checks
 
@@ -44,8 +44,8 @@ Wenn du HACS trotzdem verwenden willst:
 
 ```bash
 # ZIP-Download und Entpacken
-wget https://github.com/sweidinger/ha-print-cost-analyzer/archive/refs/tags/v2024.8.0.zip
-unzip v2024.8.0.zip
+wget https://github.com/sweidinger/ha-print-cost-analyzer/archive/refs/tags/v2024.8.1.zip
+unzip v2024.8.1.zip
 cp -r ha-print-cost-analyzer-master/custom_components/print_cost_analyzer /config/custom_components/
 
 # Home Assistant neustarten
@@ -78,7 +78,7 @@ Wenn der ZIP-Download nicht funktioniert, kannst du die Dateien manuell herunter
 ---
 
 **URL**: https://github.com/sweidinger/ha-print-cost-analyzer  
-**Version**: v2024.8.0 (veröffentlicht)  
-**Download**: https://github.com/sweidinger/ha-print-cost-analyzer/archive/refs/tags/v2024.8.0.zip  
+**Version**: v2024.8.1 (veröffentlicht)  
+**Download**: https://github.com/sweidinger/ha-print-cost-analyzer/archive/refs/tags/v2024.8.1.zip  
 
 Die Integration sollte jetzt problemlos über ZIP-Download oder manuelle Installation funktionieren! 🎯

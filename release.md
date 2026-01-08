@@ -1,6 +1,6 @@
-name: Release v2024.8.0
+name: Release v2024.8.1
 body: |
-  ## 🎉 3D Print Cost Analyzer v2024.8.0
+  ## 🎉 3D Print Cost Analyzer v2024.8.1
 
   Diese Version löst das bekannte HACS-Kompatibilitätsproblem mit Home Assistant 2024.8+.
 
@@ -14,8 +14,8 @@ body: |
   #### Methode 1: ZIP-Download (empfohlen)
   ```bash
   # Download und Entpacken
-  wget https://github.com/sweidinger/ha-print-cost-analyzer/archive/refs/tags/v2024.8.0.zip
-  unzip v2024.8.0.zip
+  wget https://github.com/sweidinger/ha-print-cost-analyzer/archive/refs/tags/v2024.8.1.zip
+  unzip v2024.8.1.zip
   
   # Kopieren nach HomeAssistant
   cp -r ha-print-cost-analyzer-master/custom_components/print_cost_analyzer /config/custom_components/
@@ -38,7 +38,7 @@ body: |
 
   ### 🔗 Links
 
-  - **ZIP-Download**: https://github.com/sweidinger/ha-print-cost-analyzer/archive/refs/tags/v2024.8.0.zip
+  - **ZIP-Download**: https://github.com/sweidinger/ha-print-cost-analyzer/archive/refs/tags/v2024.8.1.zip
   - **Repository**: https://github.com/sweidinger/ha-print-cost-analyzer
   - **Issues**: https://github.com/sweidinger/ha-print-cost-analyzer/issues
 
