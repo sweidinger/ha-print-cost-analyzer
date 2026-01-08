@@ -142,7 +142,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     ): EntitySelector(
                         EntitySelectorConfig(
                             domain=["sensor"],
-                            entity=energy_price_entities,
+                            include_entities=energy_price_entities,
                         )
                     )
                 }
@@ -193,7 +193,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     ): EntitySelector(
                         EntitySelectorConfig(
                             domain=["sensor"],
-                            entity=shelly_power_entities,
+                            include_entities=shelly_power_entities,
                             multiple=True,
                         )
                     ),
@@ -203,7 +203,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     ): EntitySelector(
                         EntitySelectorConfig(
                             domain=["sensor"],
-                            entity=shelly_energy_entities,
+                            include_entities=shelly_energy_entities,
                             multiple=True,
                         )
                     ),
@@ -236,7 +236,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     ): EntitySelector(
                         EntitySelectorConfig(
                             domain=["sensor"],
-                            entity=ams_entities,
+                            include_entities=ams_entities,
                             multiple=True,
                         )
                     ),
