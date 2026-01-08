@@ -1,0 +1,8 @@
+{
+  "name": "3D Print Cost Analyzer",
+  "content_in_root": false,
+  "render_readme": true,
+  "zip_release": true,
+  "filename": "print_cost_analyzer.zip",
+  "homeassistant": "2024.8.0"
+}
