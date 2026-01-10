@@ -273,41 +273,6 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 }
             )
 
-        schema = schema.extend(
-            {
-                vol.Optional(
-                    CONF_SHELLY_POWER_ENTITIES,
-                    default=shelly_power_entities,
-                ): EntitySelector(
-                    EntitySelectorConfig(
-                        domain=["sensor"],
-                        include_entities=shelly_power_entities,
-                        multiple=True,
-                    )
-                ),
-                vol.Optional(
-                    CONF_SHELLY_ENERGY_ENTITIES,
-                    default=shelly_energy_entities,
-                ): EntitySelector(
-                    EntitySelectorConfig(
-                        domain=["sensor"],
-                        include_entities=shelly_energy_entities,
-                        multiple=True,
-                    )
-                ),
-                vol.Optional(
-                    CONF_AMS_ENTITIES,
-                    default=ams_entities,
-                ): EntitySelector(
-                    EntitySelectorConfig(
-                        domain=["sensor"],
-                        include_entities=ams_entities,
-                        multiple=True,
-                    )
-                ),
-            }
-        )
-
         return self.async_show_form(
             step_id="printer",
             data_schema=schema,
