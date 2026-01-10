@@ -102,12 +102,6 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Handle the initial step."""
         errors: Dict[str, str] = {}
 
-        if not self._global_config:
-            self._global_config = await self._async_load_global_config()
-
-        if self._global_config and user_input is None:
-            return await self.async_step_printer()
-
         if user_input is not None:
             self._global_config = {
                 CONF_SPOOLMAN_URL: user_input[CONF_SPOOLMAN_URL],
