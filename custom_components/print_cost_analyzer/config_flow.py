@@ -215,11 +215,13 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     ) -> FlowResult:
         """Handle per-printer configuration."""
         if user_input is not None:
-            self._printer_name = user_input[CONF_NAME]
-            self._spoolman_spool_ids = user_input.get(CONF_SPOOLMAN_SPOOL_IDS, [])
-            self._shelly_power_entities = user_input.get(CONF_SHELLY_POWER_ENTITIES, [])
-            self._shelly_energy_entities = user_input.get(CONF_SHELLY_ENERGY_ENTITIES, [])
-            self._ams_entities = user_input.get(CONF_AMS_ENTITIES, [])
+            # Allow skipping printer setup if no name is provided
+            if user_input.get(CONF_NAME):
+                self._printer_name = user_input[CONF_NAME]
+                self._spoolman_spool_ids = user_input.get(CONF_SPOOLMAN_SPOOL_IDS, [])
+                self._shelly_power_entities = user_input.get(CONF_SHELLY_POWER_ENTITIES, [])
+                self._shelly_energy_entities = user_input.get(CONF_SHELLY_ENERGY_ENTITIES, [])
+                self._ams_entities = user_input.get(CONF_AMS_ENTITIES, [])
             return self._create_entry()
 
         if not self._global_config:
@@ -251,7 +253,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         schema = vol.Schema(
             {
-                vol.Required(CONF_NAME): str,
+                vol.Optional(CONF_NAME): str,
             }
         )
 

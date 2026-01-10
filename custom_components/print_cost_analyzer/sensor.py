@@ -234,6 +234,52 @@ class EnergyCostSensor(PrintCostSensor):
         return self.coordinator.data.get("energy_cost_per_kwh")
 
 
+class SpoolmanStatusSensor(PrintCostSensor):
+    """Sensor for Spoolman connection status."""
+
+    def __init__(self, coordinator, entry: ConfigEntry) -> None:
+        """Initialize the sensor."""
+        super().__init__(
+            coordinator,
+            entry,
+            "Spoolman Connection",
+            "spoolman_status",
+            SensorDeviceClass.ENUM,
+            None,
+            None,
+        )
+
+    @property
+    def native_value(self) -> Optional[str]:
+        """Return the Spoolman connection status."""
+        if not self.coordinator.data:
+            return "unknown"
+        return "connected" if self.coordinator.data.get("spoolman_connected") else "disconnected"
+
+
+class InfluxDBStatusSensor(PrintCostSensor):
+    """Sensor for InfluxDB connection status."""
+
+    def __init__(self, coordinator, entry: ConfigEntry) -> None:
+        """Initialize the sensor."""
+        super().__init__(
+            coordinator,
+            entry,
+            "InfluxDB Connection",
+            "influxdb_status",
+            SensorDeviceClass.ENUM,
+            None,
+            None,
+        )
+
+    @property
+    def native_value(self) -> Optional[str]:
+        """Return the InfluxDB connection status."""
+        if not self.coordinator.data:
+            return "unknown"
+        return "connected" if self.coordinator.data.get("influxdb_connected") else "disconnected"
+
+
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities
 ) -> None:
@@ -245,6 +291,8 @@ async def async_setup_entry(
         ActiveSpoolsSensor(coordinator, entry),
         TotalPrintsSensor(coordinator, entry),
         EnergyCostSensor(coordinator, entry),
+        SpoolmanStatusSensor(coordinator, entry),
+        InfluxDBStatusSensor(coordinator, entry),
     ]
 
     # Add sensors for each Shelly power entity

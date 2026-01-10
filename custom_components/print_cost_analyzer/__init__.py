@@ -43,7 +43,7 @@ _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS = [Platform.SENSOR, Platform.BUTTON]
 
-__version__ = "2024.8.4"
+__version__ = "2024.8.5"
 
 
 class PrintCostCoordinator(DataUpdateCoordinator):
@@ -78,6 +78,8 @@ class PrintCostCoordinator(DataUpdateCoordinator):
         self.energy_data: Dict[str, Any] = {}
         self.ams_data: Dict[str, Any] = {}
         self.print_history: List[Dict[str, Any]] = []
+        self.spoolman_connected: bool = False
+        self.influxdb_connected: bool = False
 
         super().__init__(
             hass,
@@ -95,8 +97,10 @@ class PrintCostCoordinator(DataUpdateCoordinator):
                 token=self.influxdb_token,
                 org=self.influxdb_org,
             )
+            self.influxdb_connected = True
             _LOGGER.info("InfluxDB client initialized successfully")
         except Exception as e:
+            self.influxdb_connected = False
             _LOGGER.error("Failed to initialize InfluxDB client: %s", e)
             raise
 
@@ -118,6 +122,8 @@ class PrintCostCoordinator(DataUpdateCoordinator):
                 "print_history": self.print_history,
                 "total_cost": self._calculate_total_cost(),
                 "energy_cost_per_kwh": await self._get_energy_cost_per_kwh(),
+                "spoolman_connected": self.spoolman_connected,
+                "influxdb_connected": self.influxdb_connected,
             }
         except Exception as exception:
             raise UpdateFailed(f"Error communicating with APIs: {exception}")
@@ -125,6 +131,7 @@ class PrintCostCoordinator(DataUpdateCoordinator):
     async def _fetch_spoolman_data(self) -> None:
         """Fetch data from Spoolman API."""
         if not self.spoolman_url:
+            self.spoolman_connected = False
             return
 
         headers = {}
@@ -151,10 +158,13 @@ class PrintCostCoordinator(DataUpdateCoordinator):
                             }
                         else:
                             self.spool_data = spools
+                        self.spoolman_connected = True
                         _LOGGER.debug("Fetched %d active spools from Spoolman", len(self.spool_data))
                     else:
+                        self.spoolman_connected = False
                         _LOGGER.error("Failed to fetch Spoolman data: %s", response.status)
         except Exception as e:
+            self.spoolman_connected = False
             _LOGGER.error("Error fetching Spoolman data: %s", e)
 
     async def _fetch_shelly_energy_data(self) -> None:
@@ -219,6 +229,7 @@ class PrintCostCoordinator(DataUpdateCoordinator):
     async def _fetch_influxdb_print_data(self) -> None:
         """Fetch print history from InfluxDB."""
         if not self.influxdb_client:
+            self.influxdb_connected = False
             return
 
         query_api = self.influxdb_client.query_api()
@@ -247,8 +258,10 @@ class PrintCostCoordinator(DataUpdateCoordinator):
                         "energy_consumed": record.values.get("energy_consumed"),
                         "spool_id": record.values.get("spool_id"),
                     })
+            self.influxdb_connected = True
             _LOGGER.debug("Fetched %d print jobs from InfluxDB", len(self.print_history))
         except Exception as e:
+            self.influxdb_connected = False
             _LOGGER.error("Failed to query InfluxDB: %s", e)
 
     async def _calculate_costs(self) -> None:
