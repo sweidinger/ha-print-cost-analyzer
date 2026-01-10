@@ -435,60 +435,10 @@ class PrintCostAnalyzerOptionsFlow(config_entries.OptionsFlow):
             data_schema=schema,
         )
 
-    async def async_step_init(
-        self, user_input: Optional[Dict[str, Any]] = None
-    ) -> FlowResult:
-        """Handle the options flow."""
-        if not self._global_config:
-            self._global_config = await self._async_load_global_config()
-
-        if user_input is not None:
-            self._global_config = {
-                CONF_SPOOLMAN_URL: user_input[CONF_SPOOLMAN_URL],
-                CONF_SPOOLMAN_TOKEN: user_input.get(CONF_SPOOLMAN_TOKEN),
-                CONF_INFLUXDB_URL: user_input[CONF_INFLUXDB_URL],
-                CONF_INFLUXDB_TOKEN: user_input[CONF_INFLUXDB_TOKEN],
-                CONF_INFLUXDB_ORG: user_input[CONF_INFLUXDB_ORG],
-                CONF_INFLUXDB_BUCKET: user_input[CONF_INFLUXDB_BUCKET],
-            }
-            return await self.async_step_energy_cost()
-
-        return self.async_show_form(
-            step_id="init",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(
-                        CONF_SPOOLMAN_URL,
-                        default=self._global_config.get(CONF_SPOOLMAN_URL, ""),
-                    ): str,
-                    vol.Optional(
-                        CONF_SPOOLMAN_TOKEN,
-                        default=self._global_config.get(CONF_SPOOLMAN_TOKEN, ""),
-                    ): str,
-                    vol.Required(
-                        CONF_INFLUXDB_URL,
-                        default=self._global_config.get(CONF_INFLUXDB_URL, ""),
-                    ): str,
-                    vol.Required(
-                        CONF_INFLUXDB_TOKEN,
-                        default=self._global_config.get(CONF_INFLUXDB_TOKEN, ""),
-                    ): str,
-                    vol.Required(
-                        CONF_INFLUXDB_ORG,
-                        default=self._global_config.get(CONF_INFLUXDB_ORG, ""),
-                    ): str,
-                    vol.Required(
-                        CONF_INFLUXDB_BUCKET,
-                        default=self._global_config.get(CONF_INFLUXDB_BUCKET, ""),
-                    ): str,
-                }
-            ),
-        )
-
     async def async_step_energy_cost(
         self, user_input: Optional[Dict[str, Any]] = None
     ) -> FlowResult:
-        """Handle energy cost configuration."""
+        """Handle energy cost configuration in options."""
         if user_input is not None:
             energy_cost_source = user_input[CONF_ENERGY_COST_SOURCE]
             if energy_cost_source == "fixed":
