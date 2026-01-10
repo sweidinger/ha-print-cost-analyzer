@@ -43,7 +43,7 @@ _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS = [Platform.SENSOR, Platform.BUTTON]
 
-__version__ = "2024.8.6"
+__version__ = "2024.8.7"
 
 
 class PrintCostCoordinator(DataUpdateCoordinator):

@@ -2,7 +2,7 @@
 
 [tool.poetry]
 name = "ha-print-cost-analyzer"
-version = "0.1.4" # Use a semantic version (e.g., 1.0.0)
+version = "0.1.5" # Use a semantic version (e.g., 1.0.0)
 description = "A custom component for Home Assistant to analyze 3D print costs."
 authors = ["sweidinger"]
 readme = "README.md"

@@ -13,5 +13,5 @@
     "aiohttp>=3.8.0",
     "influxdb-client>=1.38.0"
   ],
-  "version": "2024.8.6"
+  "version": "2024.8.7"
 }
