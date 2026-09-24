@@ -1,209 +1,68 @@
 # 3D Print Cost Analyzer
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![HACS](https://img.shields.io/badge/HACS-Default-blue.svg)](https://hacs.xyz/)
-[![HomeAssistant](https://img.shields.io/badge/HomeAssistant-2024.1+-green.svg)](https://www.home-assistant.io/)
+Records every 3D print automatically and works out what it cost – electricity
+and filament, per print, in Home Assistant. No external database.
 
-Eine umfassende HomeAssistant Integration zur Kostenauswertung von 3D-Drucken mit Spoolman, Shelly Plugs und InfluxDB.
+## How it works
 
-## ✨ Features
+For each printer of the [ha-bambulab](https://github.com/greghesp/ha-bambulab)
+integration it follows the print status:
 
-- 🧵 **Materialkosten**: Automatische Auslesung aus Spoolman (`price_per_kg`)
-- ⚡ **Energiekosten**: Entity-basierte Überwachung von Shelly Plugs
-- 📊 **Historische Daten**: Speicherung in InfluxDB v2
-- 🖨️ **Multi-Drucker Support**: Unterstützung für mehrere 3D-Drucker
-- 🎯 **AMS-Unit Kompatibilität**: Filament-Tracking mit AMS-Slots
-- 💰 **Dynamische Strompreise**: Fix oder Entity-basiert
-- 🏠 **HACS-Integration**: Einfache Installation und Updates
+- **Print starts:** it notes the plug's energy meter and the `used_weight` of every
+  Spoolman spool loaded in that printer (matched by `extra.active_tray` or the Bambu
+  spool id in `extra.tag`).
+- **Print ends:** it saves the cover image, waits a few minutes (setting *wait after
+  print end*) so OpenSpoolMan can book the last layers to Spoolman, then books the print:
+  - **Electricity:** kWh difference × your price entity (e.g. `input_number.strompreis`)
+  - **Filament:** grams per spool from Spoolman × price per gram (spool price, else
+    filament price, divided by its weight). Multi-colour and cancelled prints come
+    out right because OpenSpoolMan books what was actually printed.
+  - If nothing was booked to Spoolman, the slicer's planned weight is used and the
+    print is marked as estimated.
 
-## 🚀 Installation
+Prints running while Home Assistant restarts are resumed; a print that finished
+while HA was down is booked on start-up.
 
-### Über HACS (Empfohlen)
+## Installation
 
-1. Öffnen Sie HomeAssistant → **HACS** → **Integrationen**
-2. Klicken Sie auf **"Durchsuchen & herunterladen"**
-3. Suchen Sie nach **"3D Print Cost Analyzer"**
-4. Klicken Sie auf **"Herunterladen"** und starten Sie HomeAssistant neu
+HACS → Integrations → ⋮ → Custom repositories → this repository (type Integration),
+install, restart Home Assistant, then *Settings → Devices & services → Add
+integration → 3D Print Cost Analyzer*.
 
-### Manuell
+Setup asks for the printers, the price entity and the wait time, then for each
+printer's energy meter (pre-filled when the meter's name contains the printer's).
 
-1. Laden Sie das Repository herunter:
-   ```bash
-   git clone https://github.com/your-username/ha-print-cost-analyzer.git
-   ```
-2. Kopieren Sie den Ordner nach `/config/custom_components/print_cost_analyzer/`
-3. Starten Sie HomeAssistant neu
+## Dashboard
 
-## ⚙️ Konfiguration
-
-### 1. Spoolman & InfluxDB
-- Spoolman URL und Token
-- InfluxDB v2 Verbindungsdetails
-
-### 2. Energiekosten
-- **Fixer Preis**: z.B. 0.30€/kWh
-- **Entity**: Dynamische Preis-Entity (z.B. `sensor.strompreis`)
-
-### 3. Entity-Auswahl
-- **Shelly Power Entities**: z.B. `sensor.shelly_plug_power`
-- **Shelly Energy Entities**: z.B. `sensor.shelly_plug_energy`
-- **AMS Entities**: z.B. `sensor.ams_slot1_filament`
-
-## 📊 Sensoren
-
-Die Integration erstellt automatisch folgende Sensoren:
-
-| Sensor | Beschreibung |
-|--------|-------------|
-| `sensor.total_print_cost` | Gesamtkosten aller Drucke |
-| `sensor.active_spools` | Aktive Spools (aus Spoolman) |
-| `sensor.total_prints` | Gesamtzahl der Drucke |
-| `sensor.energy_cost_per_kwh` | Aktueller Strompreis |
-| `sensor.shelly_[entity]_power` | Shelly Leistungsaufnahme |
-| `sensor.shelly_[entity]_energy` | Shelly Energieverbrauch |
-| `sensor.ams_[entity]` | AMS-Status & Filament |
-
-## 🎨 Dashboard
-
-Beispiel-Lovelace-Dashboard ist enthalten:
+The card is served by the integration, no resource needed:
 
 ```yaml
-type: entities
-title: 3D Druck Kostenübersicht
-entities:
-  - sensor.total_print_cost
-  - sensor.active_spools
-  - sensor.energy_cost_per_kwh
-  - sensor.shelly_ender3_power
-  - sensor.ams_slot1_filament
+type: custom:print-cost-card
+title: 3D-Druckkosten
 ```
 
-## 🔧 Services
+It lists every print with picture, printer, time, duration and total; tap a print
+for electricity, filament per spool and the total. Filter by printer and month.
 
-### Manuelle Druckaufnahme
-```yaml
-service: print_cost_analyzer.add_print_job
-data:
-  printer: "Ender3"
-  duration: 3600
-  material_used: 25.5
-  spool_id: "123"
-  energy_consumed: 0.15
-```
+## Entities, services, events
 
-## 📈 Datenstruktur
+- `sensor.druckkosten_gesamt`, `sensor.druckkosten_diesen_monat` – with energy and
+  filament split as attributes
+- `sensor.anzahl_drucke`, `sensor.letzter_druck`
+- `print_cost_analyzer.export_csv` – writes `/config/print_cost_analyzer.csv`
+- `print_cost_analyzer.delete_job` – removes a print by id
+- Event `print_cost_analyzer_job_finished` – fired with the full record of each print
 
-### InfluxDB Schema
-```
-Measurement: print_job
-Tags:
-  - printer: Druckername
-  - spool_id: Spool-ID
-Fields:
-  - duration: Druckdauer (Sekunden)
-  - material_used: Materialverbrauch (Gramm)
-  - energy_consumed: Energieverbrauch (kWh)
-```
+## Requirements
 
-## 🐛 Fehlerbehebung
+- ha-bambulab (print status, task name, cover image, print weight)
+- Spoolman integration; OpenSpoolMan (or anything else) booking usage to Spoolman
+- Prices in Spoolman (spool or filament)
+- An energy meter per printer, e.g. a Shelly Plug (optional)
 
-### Häufige Probleme
+## Development
 
-1. **"Invalid integration version" nach Installation**
-   - **Ursache**: Home Assistant wurde nicht neugestartet nach der Installation
-   - **Lösung**: Home Assistant **neustarten** (siehe unten)
-
-2. **"Component not found" oder "Integration not found"**
-   - **Ursache**: Cache-Problem oder inkorrekte Installation
-   - **Lösung**: 
-     1. Home Assistant neustarten
-     2. Custom Components Cache löschen
-     3. Integration neu installieren
-
-3. **Spoolman-Verbindung fehlgeschlagen**
-   - URL und Token überprüfen
-   - Spoolman-Status prüfen
-
-4. **Shelly Entities nicht gefunden**
-   - Entity-IDs in HomeAssistant überprüfen
-   - Shelly-Konfiguration prüfen
-
-5. **InfluxDB-Fehler**
-   - Verbindungsdaten überprüfen
-   - Bucket-Berechtigungen prüfen
-
-### 🔧 Home Assistant Neustart nach Custom Component Installation
-
-**WICHTIG**: Nach jeder Änderung an Custom Components ist ein Neustart erforderlich!
-
-#### Methode 1: UI Neustart
-1. Home Assistant → Developer → Restart
-2. Auf "Restart Home Assistant" klicken
-
-#### Methode 2: Kommandozeile
 ```bash
-# Docker
-docker restart homeassistant
-
-# Systemdienst
-sudo systemctl restart home-assistant
+pip install -r requirements_test.txt
+pytest
 ```
-
-#### Methode 3: Entwickler-Tools
-```bash
-# Cache löschen
-rm -rf /config/.storage/core.config_entries
-rm -rf /config/custom_components/.cache
-
-# Manuell
-http://your-homeassistant-url:8123/developer_tools/reload
-```
-
-### 📁 Manuelle Installation bei Problemen
-
-Wenn die Installation nicht funktioniert:
-
-1. **Backup erstellen**
-   ```bash
-   cp -r /config/custom_components /config/custom_components_backup
-   ```
-
-2. **Alt löschen**
-   ```bash
-   rm -rf /config/custom_components/print_cost_analyzer
-   ```
-
-3. **Neu installieren**
-   - Dateien aus `/config/custom_components/print_cost_analyzer/` kopieren
-   - Home Assistant neustarten
-
-## 🤝 Beiträge
-
-Beiträge sind willkommen! Bitte:
-
-1. Forken Sie das Repository
-2. Erstellen Sie einen Feature-Branch (`git checkout -b feature/amazing-feature`)
-3. Committen Sie Ihre Änderungen (`git commit -m 'Add amazing feature'`)
-4. Pushen Sie zum Branch (`git push origin feature/amazing-feature`)
-5. Erstellen Sie einen Pull Request
-
-## 📄 Lizenz
-
-Dieses Projekt ist unter der MIT-Lizenz lizenziert - siehe [LICENSE](LICENSE) Datei für Details.
-
-## 🙏 Danksagungen
-
-- [HomeAssistant](https://www.home-assistant.io/) für die hervorragende Plattform
-- [Spoolman](https://github.com/Donkie/spoolman) für das Filament-Management
-- [Shelly](https://www.shelly.cloud/) für die Smart-Steckdosen
-- [InfluxDB](https://www.influxdata.com/) für die Zeitreihen-Datenbank
-
-## 📞 Support
-
-- **Issues**: [GitHub Issues](https://github.com/your-username/ha-print-cost-analyzer/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/your-username/ha-print-cost-analyzer/discussions)
-- **HomeAssistant Community**: [Forum Thread](https://community.home-assistant.io/)
-
----
-
-⭐ Wenn Ihnen diese Integration gefällt, geben Sie ihr einen Star auf GitHub!

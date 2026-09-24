@@ -1,545 +1,112 @@
-"""Config flow for Print Cost Analyzer integration."""
-import logging
-from typing import Any, Dict, Optional, List
+"""Config and options flow for the 3D Print Cost Analyzer."""
+from __future__ import annotations
 
-import aiohttp
+from typing import Any
+
 import voluptuous as vol
 
-from homeassistant import config_entries
-from homeassistant.const import CONF_NAME
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from homeassistant.helpers.selector import (
-    EntitySelector,
-    EntitySelectorConfig,
-    SelectSelector,
-    SelectSelectorConfig,
-    SelectSelectorMode,
-)
-from homeassistant.helpers.storage import Store
-from homeassistant.data_entry_flow import FlowResult
+from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResult, OptionsFlow
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import device_registry as dr, entity_registry as er
+from homeassistant.helpers import selector
 
 from .const import (
-    DOMAIN,
-    GLOBAL_CONFIG_STORAGE_KEY,
-    GLOBAL_CONFIG_STORAGE_VERSION,
-    CONF_SPOOLMAN_URL,
-    CONF_SPOOLMAN_TOKEN,
-    CONF_SPOOLMAN_SPOOL_IDS,
-    CONF_SHELLY_POWER_ENTITIES,
-    CONF_SHELLY_ENERGY_ENTITIES,
-    CONF_AMS_ENTITIES,
-    CONF_INFLUXDB_URL,
-    CONF_INFLUXDB_TOKEN,
-    CONF_INFLUXDB_ORG,
-    CONF_INFLUXDB_BUCKET,
-    CONF_ENERGY_COST_PER_KWH,
-    CONF_ENERGY_COST_ENTITY,
-    CONF_ENERGY_COST_SOURCE,
-    DEFAULT_ENERGY_COST_PER_KWH,
+    CONF_ENERGY, CONF_PRICE_ENTITY, CONF_PRINTERS, CONF_SETTLE_MINUTES,
+    DEFAULT_PRICE_ENTITY, DEFAULT_SETTLE_MINUTES, DOMAIN, UID_STATUS,
 )
 
-_LOGGER = logging.getLogger(__name__)
+
+def _status_entities(hass: HomeAssistant) -> list[str]:
+    """Every ha-bambulab print-status entity."""
+    return sorted(
+        e.entity_id for e in er.async_get(hass).entities.values()
+        if e.platform == "bambu_lab" and e.unique_id.endswith(UID_STATUS)
+    )
 
 
-class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
-    """Handle a config flow for Print Cost Analyzer."""
+def _guess_energy(hass: HomeAssistant, status_entity: str) -> str | None:
+    """Pick the power meter whose name mentions the printer, e.g. 'Shelly H2D'."""
+    ent_reg = er.async_get(hass)
+    entry = ent_reg.async_get(status_entity)
+    device = dr.async_get(hass).async_get(entry.device_id) if entry and entry.device_id else None
+    key = ((device.name_by_user or device.name) if device else "").lower().split("_")[0]
+    if not key:
+        return None
+    for st in hass.states.async_all("sensor"):
+        if st.attributes.get("device_class") != "energy":
+            continue
+        label = f"{st.entity_id} {st.attributes.get('friendly_name', '')}".lower()
+        if key in label:
+            return st.entity_id
+    return None
 
-    VERSION = 1
+
+def _general_schema(hass: HomeAssistant, current: dict[str, Any]) -> vol.Schema:
+    return vol.Schema({
+        vol.Required(CONF_PRINTERS, default=current.get(CONF_PRINTERS, _status_entities(hass))):
+            selector.EntitySelector(selector.EntitySelectorConfig(
+                domain="sensor", integration="bambu_lab", multiple=True)),
+        vol.Required(CONF_PRICE_ENTITY, default=current.get(CONF_PRICE_ENTITY, DEFAULT_PRICE_ENTITY)):
+            selector.EntitySelector(selector.EntitySelectorConfig(domain=["input_number", "sensor", "number"])),
+        vol.Required(CONF_SETTLE_MINUTES, default=current.get(CONF_SETTLE_MINUTES, DEFAULT_SETTLE_MINUTES)):
+            selector.NumberSelector(selector.NumberSelectorConfig(
+                min=0, max=60, step=1, unit_of_measurement="min", mode=selector.NumberSelectorMode.BOX)),
+    })
+
+
+def _energy_schema(hass: HomeAssistant, printers: list[str], current: dict[str, str]) -> vol.Schema:
+    fields: dict[Any, Any] = {}
+    for eid in printers:
+        default = current.get(eid) or _guess_energy(hass, eid)
+        key = vol.Optional(eid, description={"suggested_value": default}) if default else vol.Optional(eid)
+        fields[key] = selector.EntitySelector(selector.EntitySelectorConfig(
+            domain="sensor", device_class="energy"))
+    return vol.Schema(fields)
+
+
+class PrintCostConfigFlow(ConfigFlow, domain=DOMAIN):
+    VERSION = 2
 
     def __init__(self) -> None:
-        """Initialize the config flow."""
-        self._global_config: Dict[str, Any] = {}
-        self._printer_name: Optional[str] = None
-        self._spoolman_spool_ids: List[str] = []
-        self._shelly_power_entities: List[str] = []
-        self._shelly_energy_entities: List[str] = []
-        self._ams_entities: List[str] = []
+        self._data: dict[str, Any] = {}
 
-    def _get_store(self) -> Store:
-        """Return the storage handler for global config."""
-        return Store(self.hass, GLOBAL_CONFIG_STORAGE_VERSION, GLOBAL_CONFIG_STORAGE_KEY)
-
-    async def _async_load_global_config(self) -> Dict[str, Any]:
-        """Load global config from storage."""
-        data = await self._get_store().async_load()
-        return data or {}
-
-    async def _async_save_global_config(self, data: Dict[str, Any]) -> None:
-        """Save global config to storage."""
-        await self._get_store().async_save(data)
-
-    async def _async_fetch_spoolman_spools(self) -> List[Dict[str, Any]]:
-        """Fetch spool list from Spoolman."""
-        spoolman_url = self._global_config.get(CONF_SPOOLMAN_URL)
-        if not spoolman_url:
-            return []
-
-        headers = {}
-        spoolman_token = self._global_config.get(CONF_SPOOLMAN_TOKEN)
-        if spoolman_token:
-            headers["Authorization"] = f"Bearer {spoolman_token}"
-
-        session = async_get_clientsession(self.hass)
-        try:
-            async with session.get(f"{spoolman_url}/api/v1/spool", headers=headers) as response:
-                if response.status != 200:
-                    _LOGGER.warning("Failed to fetch Spoolman spools: %s", response.status)
-                    return []
-                data = await response.json()
-        except aiohttp.ClientError as err:
-            _LOGGER.warning("Failed to fetch Spoolman spools: %s", err)
-            return []
-
-        spools: List[Dict[str, Any]] = []
-        for spool in data:
-            if spool.get("active", True):
-                spools.append(spool)
-        return spools
-
-    async def async_step_user(
-        self, user_input: Optional[Dict[str, Any]] = None
-    ) -> FlowResult:
-        """Handle the initial step."""
-        errors: Dict[str, str] = {}
-
+    async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        await self.async_set_unique_id(DOMAIN)
+        self._abort_if_unique_id_configured()
         if user_input is not None:
-            self._global_config = {
-                CONF_SPOOLMAN_URL: user_input[CONF_SPOOLMAN_URL],
-                CONF_SPOOLMAN_TOKEN: user_input.get(CONF_SPOOLMAN_TOKEN),
-                CONF_INFLUXDB_URL: user_input[CONF_INFLUXDB_URL],
-                CONF_INFLUXDB_TOKEN: user_input[CONF_INFLUXDB_TOKEN],
-                CONF_INFLUXDB_ORG: user_input[CONF_INFLUXDB_ORG],
-                CONF_INFLUXDB_BUCKET: user_input[CONF_INFLUXDB_BUCKET],
-            }
+            self._data = dict(user_input)
+            return await self.async_step_energy()
+        return self.async_show_form(step_id="user", data_schema=_general_schema(self.hass, {}))
 
-            return await self.async_step_energy_cost()
-
-        return self.async_show_form(
-            step_id="user",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(CONF_SPOOLMAN_URL): str,
-                    vol.Optional(CONF_SPOOLMAN_TOKEN): str,
-                    vol.Required(CONF_INFLUXDB_URL): str,
-                    vol.Required(CONF_INFLUXDB_TOKEN): str,
-                    vol.Required(CONF_INFLUXDB_ORG): str,
-                    vol.Required(CONF_INFLUXDB_BUCKET): str,
-                }
-            ),
-            errors=errors,
-        )
-
-    async def async_step_energy_cost(
-        self, user_input: Optional[Dict[str, Any]] = None
-    ) -> FlowResult:
-        """Handle energy cost configuration."""
+    async def async_step_energy(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         if user_input is not None:
-            energy_cost_source = user_input[CONF_ENERGY_COST_SOURCE]
-            if energy_cost_source == "fixed":
-                energy_cost_per_kwh = user_input[CONF_ENERGY_COST_PER_KWH]
-                energy_cost_entity = None
-            else:
-                energy_cost_entity = user_input[CONF_ENERGY_COST_ENTITY]
-                energy_cost_per_kwh = DEFAULT_ENERGY_COST_PER_KWH
-
-            self._global_config.update(
-                {
-                    CONF_ENERGY_COST_SOURCE: energy_cost_source,
-                    CONF_ENERGY_COST_PER_KWH: energy_cost_per_kwh,
-                    CONF_ENERGY_COST_ENTITY: energy_cost_entity,
-                }
-            )
-            await self._async_save_global_config(self._global_config)
-
-            return self.async_create_entry(
-                title="3D Print Cost Analyzer",
-                data={},
-            )
-
-        # Get available energy price entities
-        energy_price_entities = []
-        for state in self.hass.states.async_all():
-            entity_id = state.entity_id
-            if state.attributes.get("unit_of_measurement") in [
-                "€/kWh",
-                "EUR/kWh",
-                "€/kW",
-                "EUR/kW",
-            ] or "price" in entity_id.lower() or "cost" in entity_id.lower():
-                energy_price_entities.append(entity_id)
-
-        schema = vol.Schema(
-            {
-                vol.Required(
-                    CONF_ENERGY_COST_SOURCE,
-                    default="fixed",
-                ): SelectSelector(
-                    SelectSelectorConfig(
-                        options=[
-                            {"value": "fixed", "label": "Fester Preis"},
-                            {"value": "entity", "label": "Entity"},
-                        ],
-                        mode=SelectSelectorMode.DROPDOWN,
-                    )
-                )
-            }
-        )
-
-        if energy_price_entities:
-            schema = schema.extend(
-                {
-                    vol.Optional(
-                        CONF_ENERGY_COST_ENTITY,
-                    ): EntitySelector(
-                        EntitySelectorConfig(
-                            domain=["sensor"],
-                            include_entities=energy_price_entities,
-                        )
-                    )
-                }
-            )
-
-        schema = schema.extend(
-            {
-                vol.Optional(
-                    CONF_ENERGY_COST_PER_KWH,
-                    default=DEFAULT_ENERGY_COST_PER_KWH,
-                ): vol.Coerce(float),
-            }
-        )
-
+            self._data[CONF_ENERGY] = {k: v for k, v in user_input.items() if v}
+            return self.async_create_entry(title="3D-Druckkosten", data=self._data)
         return self.async_show_form(
-            step_id="energy_cost",
-            data_schema=schema,
-        )
+            step_id="energy", data_schema=_energy_schema(self.hass, self._data[CONF_PRINTERS], {}))
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(entry: ConfigEntry) -> OptionsFlow:
+        return PrintCostOptionsFlow()
 
 
-class PrintCostAnalyzerOptionsFlow(config_entries.OptionsFlow):
-    """Handle options for Print Cost Analyzer."""
+class PrintCostOptionsFlow(OptionsFlow):
+    def __init__(self) -> None:
+        self._data: dict[str, Any] = {}
 
-    def __init__(self, entry: config_entries.ConfigEntry) -> None:
-        """Initialize options flow."""
-        self._entry = entry
-        self._global_config: Dict[str, Any] = {}
+    def _current(self) -> dict[str, Any]:
+        return {**self.config_entry.data, **self.config_entry.options}
 
-    def _get_store(self) -> Store:
-        """Return the storage handler for global config."""
-        return Store(self.hass, GLOBAL_CONFIG_STORAGE_VERSION, GLOBAL_CONFIG_STORAGE_KEY)
-
-    async def _async_load_global_config(self) -> Dict[str, Any]:
-        """Load global config from storage."""
-        data = await self._get_store().async_load()
-        return data or {}
-
-    async def _async_save_global_config(self, data: Dict[str, Any]) -> None:
-        """Save global config to storage."""
-        await self._get_store().async_save(data)
-
-    async def async_step_init(
-        self, user_input: Optional[Dict[str, Any]] = None
-    ) -> FlowResult:
-        """Handle the options flow."""
-        return self.async_show_menu(
-            step_id="init",
-            menu_options=["global_settings", "add_device"],
-        )
-
-    async def async_step_global_settings(
-        self, user_input: Optional[Dict[str, Any]] = None
-    ) -> FlowResult:
-        """Handle global settings configuration."""
-        if not self._global_config:
-            self._global_config = await self._async_load_global_config()
-
+    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         if user_input is not None:
-            self._global_config = {
-                CONF_SPOOLMAN_URL: user_input[CONF_SPOOLMAN_URL],
-                CONF_SPOOLMAN_TOKEN: user_input.get(CONF_SPOOLMAN_TOKEN),
-                CONF_INFLUXDB_URL: user_input[CONF_INFLUXDB_URL],
-                CONF_INFLUXDB_TOKEN: user_input[CONF_INFLUXDB_TOKEN],
-                CONF_INFLUXDB_ORG: user_input[CONF_INFLUXDB_ORG],
-                CONF_INFLUXDB_BUCKET: user_input[CONF_INFLUXDB_BUCKET],
-            }
-            return await self.async_step_energy_cost()
+            self._data = dict(user_input)
+            return await self.async_step_energy()
+        return self.async_show_form(step_id="init", data_schema=_general_schema(self.hass, self._current()))
 
-        return self.async_show_form(
-            step_id="global_settings",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(
-                        CONF_SPOOLMAN_URL,
-                        default=self._global_config.get(CONF_SPOOLMAN_URL, ""),
-                    ): str,
-                    vol.Optional(
-                        CONF_SPOOLMAN_TOKEN,
-                        default=self._global_config.get(CONF_SPOOLMAN_TOKEN, ""),
-                    ): str,
-                    vol.Required(
-                        CONF_INFLUXDB_URL,
-                        default=self._global_config.get(CONF_INFLUXDB_URL, ""),
-                    ): str,
-                    vol.Required(
-                        CONF_INFLUXDB_TOKEN,
-                        default=self._global_config.get(CONF_INFLUXDB_TOKEN, ""),
-                    ): str,
-                    vol.Required(
-                        CONF_INFLUXDB_ORG,
-                        default=self._global_config.get(CONF_INFLUXDB_ORG, ""),
-                    ): str,
-                    vol.Required(
-                        CONF_INFLUXDB_BUCKET,
-                        default=self._global_config.get(CONF_INFLUXDB_BUCKET, ""),
-                    ): str,
-                }
-            ),
-        )
-
-    async def async_step_add_device(
-        self, user_input: Optional[Dict[str, Any]] = None
-    ) -> FlowResult:
-        """Handle adding a new printer device."""
-        if not self._global_config:
-            self._global_config = await self._async_load_global_config()
-
+    async def async_step_energy(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         if user_input is not None:
-            printer_name = user_input.get(CONF_NAME)
-            spoolman_spool_ids = user_input.get(CONF_SPOOLMAN_SPOOL_IDS, [])
-            shelly_power_entities = user_input.get(CONF_SHELLY_POWER_ENTITIES, [])
-            shelly_energy_entities = user_input.get(CONF_SHELLY_ENERGY_ENTITIES, [])
-            ams_entities = user_input.get(CONF_AMS_ENTITIES, [])
-            
-            # Create a new config entry for this printer device
-            return self.async_create_entry(
-                title=printer_name or "3D Print Cost Analyzer",
-                data={
-                    CONF_NAME: printer_name,
-                    CONF_SPOOLMAN_SPOOL_IDS: spoolman_spool_ids,
-                    CONF_SHELLY_POWER_ENTITIES: shelly_power_entities,
-                    CONF_SHELLY_ENERGY_ENTITIES: shelly_energy_entities,
-                    CONF_AMS_ENTITIES: ams_entities,
-                },
-            )
-
-        # Get available Shelly entities
-        shelly_power_entities = []
-        shelly_energy_entities = []
-        
-        for state in self.hass.states.async_all():
-            entity_id = state.entity_id
-            if "shelly" in entity_id.lower():
-                if "power" in entity_id.lower() or state.attributes.get("unit_of_measurement") == "W":
-                    shelly_power_entities.append(entity_id)
-                elif "energy" in entity_id.lower() or state.attributes.get("unit_of_measurement") in ["kWh", "Wh"]:
-                    shelly_energy_entities.append(entity_id)
-
-        ams_entities = []
-        for state in self.hass.states.async_all():
-            entity_id = state.entity_id
-            if "ams" in entity_id.lower() or "filament" in entity_id.lower():
-                ams_entities.append(entity_id)
-
-        spool_options = []
-        try:
-            session = async_get_clientsession(self.hass)
-            spoolman_url = self._global_config.get(CONF_SPOOLMAN_URL)
-            spoolman_token = self._global_config.get(CONF_SPOOLMAN_TOKEN)
-            
-            if spoolman_url:
-                headers = {}
-                if spoolman_token:
-                    headers["Authorization"] = f"Bearer {spoolman_token}"
-                    
-                async with session.get(f"{spoolman_url}/api/v1/spool", headers=headers) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        for spool in data:
-                            if spool.get("active", True):
-                                spool_id = str(spool.get("id"))
-                                label = spool.get("name") or spool.get("material", {}).get("name") or f"Spool {spool_id}"
-                                spool_options.append({"value": spool_id, "label": label})
-        except Exception as e:
-            _LOGGER.warning("Failed to fetch Spoolman spools: %s", e)
-
-        schema = vol.Schema(
-            {
-                vol.Required(CONF_NAME): str,
-            }
-        )
-
-        if spool_options:
-            schema = schema.extend(
-                {
-                    vol.Optional(
-                        CONF_SPOOLMAN_SPOOL_IDS,
-                        default=[],
-                    ): SelectSelector(
-                        SelectSelectorConfig(
-                            options=spool_options,
-                            mode=SelectSelectorMode.DROPDOWN,
-                            multiple=True,
-                        )
-                    ),
-                }
-            )
-
-        if shelly_power_entities:
-            schema = schema.extend(
-                {
-                    vol.Optional(
-                        CONF_SHELLY_POWER_ENTITIES,
-                        default=[],
-                    ): EntitySelector(
-                        EntitySelectorConfig(
-                            domain=["sensor"],
-                            include_entities=shelly_power_entities,
-                            multiple=True,
-                        )
-                    ),
-                }
-            )
-
-        if shelly_energy_entities:
-            schema = schema.extend(
-                {
-                    vol.Optional(
-                        CONF_SHELLY_ENERGY_ENTITIES,
-                        default=[],
-                    ): EntitySelector(
-                        EntitySelectorConfig(
-                            domain=["sensor"],
-                            include_entities=shelly_energy_entities,
-                            multiple=True,
-                        )
-                    ),
-                }
-            )
-
-        if ams_entities:
-            schema = schema.extend(
-                {
-                    vol.Optional(
-                        CONF_AMS_ENTITIES,
-                        default=[],
-                    ): EntitySelector(
-                        EntitySelectorConfig(
-                            domain=["sensor"],
-                            include_entities=ams_entities,
-                            multiple=True,
-                        )
-                    ),
-                }
-            )
-
-        return self.async_show_form(
-            step_id="add_device",
-            data_schema=schema,
-        )
-
-    async def async_step_energy_cost(
-        self, user_input: Optional[Dict[str, Any]] = None
-    ) -> FlowResult:
-        """Handle energy cost configuration in options."""
-        if user_input is not None:
-            energy_cost_source = user_input[CONF_ENERGY_COST_SOURCE]
-            if energy_cost_source == "fixed":
-                energy_cost_per_kwh = user_input[CONF_ENERGY_COST_PER_KWH]
-                energy_cost_entity = None
-            else:
-                energy_cost_entity = user_input[CONF_ENERGY_COST_ENTITY]
-                energy_cost_per_kwh = DEFAULT_ENERGY_COST_PER_KWH
-
-            self._global_config.update(
-                {
-                    CONF_ENERGY_COST_SOURCE: energy_cost_source,
-                    CONF_ENERGY_COST_PER_KWH: energy_cost_per_kwh,
-                    CONF_ENERGY_COST_ENTITY: energy_cost_entity,
-                }
-            )
-            await self._async_save_global_config(self._global_config)
-            self.hass.data.setdefault(DOMAIN, {})
-            self.hass.data[DOMAIN]["global"] = self._global_config
-
-            for coordinator in self.hass.data[DOMAIN].get("entries", {}).values():
-                coordinator.spoolman_url = self._global_config.get(CONF_SPOOLMAN_URL)
-                coordinator.spoolman_token = self._global_config.get(CONF_SPOOLMAN_TOKEN)
-                coordinator.influxdb_url = self._global_config.get(CONF_INFLUXDB_URL)
-                coordinator.influxdb_token = self._global_config.get(CONF_INFLUXDB_TOKEN)
-                coordinator.influxdb_org = self._global_config.get(CONF_INFLUXDB_ORG)
-                coordinator.influxdb_bucket = self._global_config.get(CONF_INFLUXDB_BUCKET)
-                coordinator.energy_cost_source = self._global_config.get(
-                    CONF_ENERGY_COST_SOURCE, "fixed"
-                )
-                coordinator.energy_cost_per_kwh = self._global_config.get(
-                    CONF_ENERGY_COST_PER_KWH, DEFAULT_ENERGY_COST_PER_KWH
-                )
-                coordinator.energy_cost_entity = self._global_config.get(CONF_ENERGY_COST_ENTITY)
-                await coordinator.async_request_refresh()
-
-            return self.async_create_entry(title="", data={})
-
-        # Get available energy price entities
-        energy_price_entities = []
-        for state in self.hass.states.async_all():
-            entity_id = state.entity_id
-            if state.attributes.get("unit_of_measurement") in [
-                "€/kWh",
-                "EUR/kWh",
-                "€/kW",
-                "EUR/kW",
-            ] or "price" in entity_id.lower() or "cost" in entity_id.lower():
-                energy_price_entities.append(entity_id)
-
-        schema = vol.Schema(
-            {
-                vol.Required(
-                    CONF_ENERGY_COST_SOURCE,
-                    default=self._global_config.get(CONF_ENERGY_COST_SOURCE, "fixed"),
-                ): SelectSelector(
-                    SelectSelectorConfig(
-                        options=[
-                            {"value": "fixed", "label": "Fester Preis"},
-                            {"value": "entity", "label": "Entity"},
-                        ],
-                        mode=SelectSelectorMode.DROPDOWN,
-                    )
-                )
-            }
-        )
-
-        if energy_price_entities:
-            schema = schema.extend(
-                {
-                    vol.Optional(
-                        CONF_ENERGY_COST_ENTITY,
-                        default=self._global_config.get(CONF_ENERGY_COST_ENTITY, ""),
-                    ): EntitySelector(
-                        EntitySelectorConfig(
-                            domain=["sensor"],
-                            include_entities=energy_price_entities,
-                        )
-                    )
-                }
-            )
-
-        schema = schema.extend(
-            {
-                vol.Optional(
-                    CONF_ENERGY_COST_PER_KWH,
-                    default=self._global_config.get(
-                        CONF_ENERGY_COST_PER_KWH, DEFAULT_ENERGY_COST_PER_KWH
-                    ),
-                ): vol.Coerce(float),
-            }
-        )
-
-        return self.async_show_form(
-            step_id="energy_cost",
-            data_schema=schema,
-        )
-
-
-async def async_get_options_flow(
-    config_entry: config_entries.ConfigEntry,
-) -> config_entries.OptionsFlow:
-    """Return the options flow handler."""
-    return PrintCostAnalyzerOptionsFlow(config_entry)
+            self._data[CONF_ENERGY] = {k: v for k, v in user_input.items() if v}
+            return self.async_create_entry(data=self._data)
+        return self.async_show_form(step_id="energy", data_schema=_energy_schema(
+            self.hass, self._data[CONF_PRINTERS], self._current().get(CONF_ENERGY, {})))

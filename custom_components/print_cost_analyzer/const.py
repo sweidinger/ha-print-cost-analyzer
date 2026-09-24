@@ -1,36 +1,35 @@
-"""Constants for the Print Cost Analyzer integration."""
-from homeassistant.const import CONF_URL, CONF_USERNAME, CONF_PASSWORD, CONF_TOKEN
+"""Constants for the 3D Print Cost Analyzer."""
+from __future__ import annotations
 
 DOMAIN = "print_cost_analyzer"
 
-# Storage for global config
-GLOBAL_CONFIG_STORAGE_KEY = f"{DOMAIN}_global"
-GLOBAL_CONFIG_STORAGE_VERSION = 1
+CONF_PRINTERS = "printers"            # list of print-status entity ids (bambu_lab)
+CONF_ENERGY = "energy"                # {status_entity_id: energy_entity_id}
+CONF_PRICE_ENTITY = "price_entity"    # electricity price entity (EUR/kWh)
+CONF_SETTLE_MINUTES = "settle_minutes"
 
-# Spoolman configuration
-CONF_SPOOLMAN_URL = "spoolman_url"
-CONF_SPOOLMAN_TOKEN = "spoolman_token"
-CONF_SPOOLMAN_SPOOL_IDS = "spoolman_spool_ids"
+DEFAULT_PRICE_ENTITY = "input_number.strompreis"
+DEFAULT_SETTLE_MINUTES = 5
 
+STORAGE_VERSION = 1
+STORAGE_KEY = f"{DOMAIN}.jobs"
 
-# Shelly Plug configuration
-CONF_SHELLY_POWER_ENTITIES = "shelly_power_entities"
-CONF_SHELLY_ENERGY_ENTITIES = "shelly_energy_entities"
+EVENT_JOB_FINISHED = f"{DOMAIN}_job_finished"
+SIGNAL_UPDATED = f"{DOMAIN}_updated"
 
-# AMS configuration
-CONF_AMS_ENTITIES = "ams_entities"
+# print_status values reported by ha-bambulab
+ACTIVE_STATES = {"prepare", "running", "pause", "slicing", "init"}
+RESULT_FINISHED = "finish"
+RESULT_FAILED = "failed"
 
-# InfluxDB configuration
-CONF_INFLUXDB_URL = "influxdb_url"
-CONF_INFLUXDB_TOKEN = "influxdb_token"
-CONF_INFLUXDB_ORG = "influxdb_org"
-CONF_INFLUXDB_BUCKET = "influxdb_bucket"
+# unique_id suffixes of the sibling entities on a ha-bambulab printer device
+UID_STATUS = "_print_status"
+UID_TASK = "_subtask_name"
+UID_GCODE = "_gcode_file_downloaded"
+UID_WEIGHT = "_print_weight"
+UID_START = "_start_time"
+UID_COVER = "_cover_image"
 
-# Energy cost configuration
-CONF_ENERGY_COST_PER_KWH = "energy_cost_per_kwh"
-CONF_ENERGY_COST_ENTITY = "energy_cost_entity"
-CONF_ENERGY_COST_SOURCE = "energy_cost_source"  # "fixed" or "entity"
-DEFAULT_ENERGY_COST_PER_KWH = 0.30  # €0.30 per kWh
-
-# Update interval in seconds
-SCAN_INTERVAL = 60
+IMAGE_DIR = "www/print_cost_analyzer"
+IMAGE_URL = "/local/print_cost_analyzer"
+CARD_URL = "/print_cost_analyzer/print-cost-card.js"

@@ -3,5 +3,5 @@
   "content_in_root": false,
   "render_readme": true,
   "zip_release": false,
-  "topics": ["home-assistant", "home-assistant-component", "3d-printing", "cost-analysis", "integration"]
+  "homeassistant": "2025.1.0"
 }

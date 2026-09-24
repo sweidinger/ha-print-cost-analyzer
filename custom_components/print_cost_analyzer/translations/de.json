@@ -1,0 +1,54 @@
+{
+  "config": {
+    "abort": {
+      "already_configured": "Der 3D Print Cost Analyzer ist bereits eingerichtet."
+    },
+    "step": {
+      "user": {
+        "title": "3D-Druckkosten",
+        "description": "Drucker (Druckstatus-Entitäten der Bambu-Lab-Integration), Strompreis und Wartezeit nach Druckende, bis OpenSpoolMan den Verbrauch an Spoolman gebucht hat.",
+        "data": {
+          "printers": "Drucker",
+          "price_entity": "Strompreis (€/kWh)",
+          "settle_minutes": "Wartezeit nach Druckende"
+        }
+      },
+      "energy": {
+        "title": "Energiezähler",
+        "description": "Energiezähler (kWh) der Steckdose je Drucker. Leer lassen, wenn es keinen gibt – dann werden nur Filamentkosten gerechnet."
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "3D-Druckkosten",
+        "data": {
+          "printers": "Drucker",
+          "price_entity": "Strompreis (€/kWh)",
+          "settle_minutes": "Wartezeit nach Druckende"
+        }
+      },
+      "energy": {
+        "title": "Energiezähler",
+        "description": "Energiezähler (kWh) der Steckdose je Drucker."
+      }
+    }
+  },
+  "services": {
+    "export_csv": {
+      "name": "Als CSV exportieren",
+      "description": "Schreibt alle Drucke nach /config/print_cost_analyzer.csv."
+    },
+    "delete_job": {
+      "name": "Druck löschen",
+      "description": "Entfernt einen Druck aus der Historie.",
+      "fields": {
+        "job_id": {
+          "name": "Druck-ID",
+          "description": "ID des Drucks (aus der Karte oder dem Ereignis)."
+        }
+      }
+    }
+  }
+}
