@@ -164,7 +164,9 @@ class PrintTracker:
             missed = was in (None, "unavailable", "unknown")
             self.hass.async_create_task(self._begin(printer, partial=missed))
         elif job and not job.get("ended_at") and now not in ACTIVE_STATES \
-                and now not in ("unavailable", "unknown") and was in ACTIVE_STATES:
+                and now not in ("unavailable", "unknown"):
+            # Also from unavailable: a printer that finished while it was
+            # unreachable comes back straight as 'finish'.
             self.hass.async_create_task(self._end(printer, now))
 
     @callback
@@ -176,7 +178,8 @@ class PrintTracker:
             self.hass.async_create_task(self._save())
             async_dispatcher_send(self.hass, SIGNAL_UPDATED)
 
-    def _refresh_meta(self, printer: Printer, job: dict[str, Any]) -> bool:
+    def _refresh_meta(self, printer: Printer, job: dict[str, Any],
+                      at_end: bool = False) -> bool:
         """Fill in what was unknown when the job began. True if anything changed.
 
         After a restart or a lost connection the print status often comes back
@@ -199,12 +202,23 @@ class PrintTracker:
         if weight and not job.get("planned_grams"):
             job["planned_grams"] = weight
             changed = True
-        if job.get("partial"):
-            raw = printer.sibling_state(self.hass, UID_START)
-            real = dt_util.parse_datetime(raw) if raw else None
-            noted = dt_util.parse_datetime(job["started_at"])
-            if real and noted and real < noted:
+        raw = printer.sibling_state(self.hass, UID_START)
+        real = dt_util.parse_datetime(raw) if raw else None
+        noted = dt_util.parse_datetime(job["started_at"])
+        if real and noted and real < noted:
+            # While a job is partial the printer's start time is trusted. At the
+            # end of a print it always belongs to that print, so a start noted
+            # much later than the printer's own is corrected then as well.
+            if job.get("partial") or (at_end and noted - real > timedelta(minutes=10)):
                 job["started_at"] = real.isoformat()
+                job["partial"] = True
+                changed = True
+        if job.get("energy_start") is None and printer.energy_entity and not at_end:
+            # The meter was unavailable when the job began: count from now on.
+            reading = self._energy(printer)
+            if reading is not None:
+                job["energy_start"] = reading
+                job["partial"] = True
                 changed = True
         return changed
 
@@ -241,7 +255,7 @@ class PrintTracker:
         job = self.active.get(printer.status_entity)
         if not job or job.get("ended_at"):
             return
-        self._refresh_meta(printer, job)
+        self._refresh_meta(printer, job, at_end=True)
         job["ended_at"] = dt_util.utcnow().isoformat()
         job["result"] = ("finished" if state == RESULT_FINISHED
                          else "failed" if state == RESULT_FAILED else "cancelled")

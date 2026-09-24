@@ -33,7 +33,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     await hass.http.async_register_static_paths([
         StaticPathConfig(CARD_URL, str(Path(__file__).parent / "frontend" / "print-cost-card.js"), False)
     ])
-    add_extra_js_url(hass, f"{CARD_URL}?v=2.0.2")
+    add_extra_js_url(hass, f"{CARD_URL}?v=2.0.3")
     websocket_api.async_register_command(hass, ws_jobs)
     return True
 

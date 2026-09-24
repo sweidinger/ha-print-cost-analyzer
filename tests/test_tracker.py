@@ -233,3 +233,51 @@ async def test_late_metadata_is_filled_in(hass):
     assert job["makerworld_id"] == "31879733"
     assert job["planned_grams"] == 20.0
     assert job["started_at"].startswith("2026-09-24T17:32")
+
+
+async def test_finish_while_unreachable_still_ends_the_job(hass):
+    _setup_printer(hass)
+    tracker, _ = await _tracker(hass)
+    hass.states.async_set(STATUS, "running")
+    await hass.async_block_till_done()
+    hass.states.async_set(STATUS, "unavailable")
+    await hass.async_block_till_done()
+    hass.states.async_set(STATUS, "finish")          # comes back already done
+    await hass.async_block_till_done()
+    await hass.async_block_till_done()
+    assert tracker.active == {}
+    assert tracker.jobs[-1]["result"] == "finished"
+
+
+async def test_start_is_corrected_at_the_end(hass):
+    """A job noted as a fresh start gets the printer's start when it ends."""
+    _setup_printer(hass)
+    tracker, _ = await _tracker(hass)
+    hass.states.async_set(STATUS, "running")        # idle -> running, noted as 'now'
+    await hass.async_block_till_done()
+    assert next(iter(tracker.active.values()))["partial"] is False
+    hass.states.async_set(STATUS, "finish")
+    await hass.async_block_till_done()
+    await hass.async_block_till_done()
+    job = tracker.jobs[-1]
+    assert job["started_at"].startswith("2026-09-24T17:32")
+    assert job["partial"] is True
+
+
+async def test_missing_meter_reading_is_taken_later(hass):
+    _setup_printer(hass)
+    hass.states.async_set("sensor.shelly_h2d", "unavailable")
+    tracker, _ = await _tracker(hass)
+    hass.states.async_set(STATUS, "running")
+    await hass.async_block_till_done()
+    job = next(iter(tracker.active.values()))
+    assert job["energy_start"] is None
+    hass.states.async_set("sensor.shelly_h2d", "100.0", {"unit_of_measurement": "kWh"})
+    hass.states.async_set("sensor.h2d_task", "Key Holder v2")     # any metadata change
+    await hass.async_block_till_done()
+    assert job["energy_start"] == 100.0
+    hass.states.async_set("sensor.shelly_h2d", "100.2", {"unit_of_measurement": "kWh"})
+    hass.states.async_set(STATUS, "finish")
+    await hass.async_block_till_done()
+    await hass.async_block_till_done()
+    assert tracker.jobs[-1]["energy_kwh"] == 0.2

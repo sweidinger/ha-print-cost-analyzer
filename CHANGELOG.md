@@ -1,5 +1,15 @@
 # Changelog
 
+## [2.0.3] - 2026-09-25
+
+### Fixed
+- A printer that finished while unreachable and comes back as `finish` now ends
+  the job (before, it stayed running forever).
+- At the end of a print its start is taken from the printer when the job was
+  noted much later (missed start), and the print is marked as partial.
+- If the energy meter was unavailable when a job began, the reading is taken as
+  soon as it is available again instead of costing no electricity at all.
+
 ## [2.0.2] - 2026-09-25
 
 ### Fixed
