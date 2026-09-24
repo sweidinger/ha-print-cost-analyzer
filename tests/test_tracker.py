@@ -183,3 +183,53 @@ def test_serial_is_cut_from_the_printer_name():
     assert _clean_name("P1S 01P00C521601306", "01P00C521601306") == "P1S"
     assert _clean_name("Werkstatt-Drucker", "0948BB520500417") == "Werkstatt-Drucker"
     assert _clean_name("0948BB520500417", "0948BB520500417") == "0948BB520500417"
+
+
+async def test_coming_back_from_unavailable_is_a_missed_start(hass):
+    _setup_printer(hass)
+    tracker, _ = await _tracker(hass)
+    hass.states.async_set(STATUS, "unavailable")
+    await hass.async_block_till_done()
+    hass.states.async_set(STATUS, "running")
+    await hass.async_block_till_done()
+    job = next(iter(tracker.active.values()))
+    assert job["partial"] is True
+    assert job["started_at"].startswith("2026-09-24T17:32")
+
+
+async def test_a_job_taken_for_a_fresh_start_is_repaired(hass):
+    """Jobs recorded by 2.0.0/2.0.1 after a lost connection get the real start."""
+    _setup_printer(hass)
+    tracker, _ = await _tracker(hass)
+    hass.states.async_set(STATUS, "running")      # idle -> running: a real, fresh start
+    await hass.async_block_till_done()
+    job = next(iter(tracker.active.values()))
+    assert job["partial"] is False               # start time is 'now', much later than 17:32
+    await tracker.async_stop()
+    tracker2, _ = await _tracker(hass)             # restart with the new version
+    job = next(iter(tracker2.active.values()))
+    assert job["partial"] is True
+    assert job["started_at"].startswith("2026-09-24T17:32")
+
+
+async def test_late_metadata_is_filled_in(hass):
+    """After a reconnect the status often arrives before name and start time."""
+    _setup_printer(hass)
+    for eid in ("sensor.h2d_task", "sensor.h2d_gcode", "sensor.h2d_weight", "sensor.h2d_start"):
+        hass.states.async_set(eid, "unavailable")
+    tracker, _ = await _tracker(hass)
+    hass.states.async_set(STATUS, "unavailable")
+    await hass.async_block_till_done()
+    hass.states.async_set(STATUS, "running")
+    await hass.async_block_till_done()
+    job = next(iter(tracker.active.values()))
+    assert job["name"] == "Druck" and job["partial"] is True
+    hass.states.async_set("sensor.h2d_task", "Key Holder_plate_1")
+    hass.states.async_set("sensor.h2d_gcode", "31879733-Key Holder_plate_1.gcode")
+    hass.states.async_set("sensor.h2d_weight", "20.0")
+    hass.states.async_set("sensor.h2d_start", "2026-09-24T17:32:00+00:00")
+    await hass.async_block_till_done()
+    assert job["name"] == "Key Holder_plate_1"
+    assert job["makerworld_id"] == "31879733"
+    assert job["planned_grams"] == 20.0
+    assert job["started_at"].startswith("2026-09-24T17:32")

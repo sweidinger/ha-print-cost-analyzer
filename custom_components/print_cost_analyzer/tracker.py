@@ -100,6 +100,29 @@ class PrintTracker:
             os.makedirs, self.hass.config.path(IMAGE_DIR), 0o755, True)
         self._unsubs.append(async_track_state_change_event(
             self.hass, list(self.printers), self._on_status))
+        self._meta_owner = {
+            p.siblings[k]: eid for eid, p in self.printers.items()
+            for k in (UID_TASK, UID_GCODE, UID_WEIGHT, UID_START) if k in p.siblings
+        }
+        if self._meta_owner:
+            self._unsubs.append(async_track_state_change_event(
+                self.hass, list(self._meta_owner), self._on_meta))
+        # Repair jobs that were taken for fresh starts although the printer
+        # reports an earlier start (2.0.0/2.0.1 after a lost connection).
+        for eid, job in self.active.items():
+            printer = self.printers.get(eid)
+            if printer is None or job.get("partial") or job.get("ended_at"):
+                continue
+            raw = printer.sibling_state(self.hass, UID_START)
+            real = dt_util.parse_datetime(raw) if raw else None
+            noted = dt_util.parse_datetime(job["started_at"])
+            if real and noted and noted - real > timedelta(minutes=10):
+                job["started_at"] = real.isoformat()
+                job["partial"] = True
+                _LOGGER.info("%s: start corrected to %s (missed start)", printer.name, real)
+        for eid, job in self.active.items():
+            if eid in self.printers and not job.get("ended_at"):
+                self._refresh_meta(self.printers[eid], job)
         # Reconcile what happened while Home Assistant was not running.
         for eid, printer in self.printers.items():
             st = self.hass.states.get(eid)
@@ -135,10 +158,55 @@ class PrintTracker:
         now = new.state
         job = self.active.get(eid)
         if now in ACTIVE_STATES and not job:
-            self.hass.async_create_task(self._begin(printer))
+            # Coming back from unavailable/unknown (restart, lost connection)
+            # means the print was already running: take the printer's own
+            # start time and mark the job as partially observed.
+            missed = was in (None, "unavailable", "unknown")
+            self.hass.async_create_task(self._begin(printer, partial=missed))
         elif job and not job.get("ended_at") and now not in ACTIVE_STATES \
                 and now not in ("unavailable", "unknown") and was in ACTIVE_STATES:
             self.hass.async_create_task(self._end(printer, now))
+
+    @callback
+    def _on_meta(self, event: Event) -> None:
+        """Task name, file, weight or start time arrived after the status did."""
+        eid = self._meta_owner.get(event.data["entity_id"])
+        job = self.active.get(eid) if eid else None
+        if job and not job.get("ended_at") and self._refresh_meta(self.printers[eid], job):
+            self.hass.async_create_task(self._save())
+            async_dispatcher_send(self.hass, SIGNAL_UPDATED)
+
+    def _refresh_meta(self, printer: Printer, job: dict[str, Any]) -> bool:
+        """Fill in what was unknown when the job began. True if anything changed.
+
+        After a restart or a lost connection the print status often comes back
+        a moment before the task name and start time do.
+        """
+        changed = False
+        task = printer.sibling_state(self.hass, UID_TASK)
+        gcode = printer.sibling_state(self.hass, UID_GCODE)
+        if task and job.get("name") in (None, "", "Druck", job.get("file")):
+            job["name"] = task
+            changed = True
+        if gcode and not job.get("file"):
+            job["file"] = gcode
+            mw = _MAKERWORLD_RE.match(gcode)
+            job["makerworld_id"] = mw.group(1) if mw else None
+            if job.get("name") in (None, "", "Druck"):
+                job["name"] = gcode
+            changed = True
+        weight = _float(printer.sibling_state(self.hass, UID_WEIGHT))
+        if weight and not job.get("planned_grams"):
+            job["planned_grams"] = weight
+            changed = True
+        if job.get("partial"):
+            raw = printer.sibling_state(self.hass, UID_START)
+            real = dt_util.parse_datetime(raw) if raw else None
+            noted = dt_util.parse_datetime(job["started_at"])
+            if real and noted and real < noted:
+                job["started_at"] = real.isoformat()
+                changed = True
+        return changed
 
     async def _begin(self, printer: Printer, partial: bool = False) -> None:
         hass = self.hass
@@ -173,6 +241,7 @@ class PrintTracker:
         job = self.active.get(printer.status_entity)
         if not job or job.get("ended_at"):
             return
+        self._refresh_meta(printer, job)
         job["ended_at"] = dt_util.utcnow().isoformat()
         job["result"] = ("finished" if state == RESULT_FINISHED
                          else "failed" if state == RESULT_FAILED else "cancelled")

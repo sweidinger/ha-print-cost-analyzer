@@ -33,7 +33,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     await hass.http.async_register_static_paths([
         StaticPathConfig(CARD_URL, str(Path(__file__).parent / "frontend" / "print-cost-card.js"), False)
     ])
-    add_extra_js_url(hass, f"{CARD_URL}?v=2.0.1")
+    add_extra_js_url(hass, f"{CARD_URL}?v=2.0.2")
     websocket_api.async_register_command(hass, ws_jobs)
     return True
 
@@ -110,8 +110,9 @@ def ws_jobs(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg
         connection.send_result(msg["id"], {"jobs": [], "active": [], "printers": []})
         return
     active = [
-        {k: v for k, v in job.items() if k not in ("spools_start", "tags_seen")}
-        for job in tracker.active.values()
+        {**{k: v for k, v in job.items() if k not in ("spools_start", "tags_seen")},
+         "printer": tracker.printers[eid].name if eid in tracker.printers else job.get("printer")}
+        for eid, job in tracker.active.items()
     ]
     connection.send_result(msg["id"], {
         "jobs": list(reversed(tracker.jobs)),

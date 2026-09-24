@@ -88,8 +88,9 @@ class CountSensor(_Base):
 
     @property
     def extra_state_attributes(self):
-        return {"running": [j.get("printer") for j in self.tracker.active.values()
-                            if not j.get("ended_at")]}
+        return {"running": [
+            (self.tracker.printers[eid].name if eid in self.tracker.printers else j.get("printer"))
+            for eid, j in self.tracker.active.items() if not j.get("ended_at")]}
 
 
 class LastPrintSensor(_Base):

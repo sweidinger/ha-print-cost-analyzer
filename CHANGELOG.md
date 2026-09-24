@@ -1,5 +1,16 @@
 # Changelog
 
+## [2.0.2] - 2026-09-25
+
+### Fixed
+- A printer coming back from unavailable while printing (HA restart, lost
+  connection) is no longer taken for a fresh start: the printer's own start time
+  is used and the print is marked as partially observed.
+- Prints recorded that way by 2.0.0/2.0.1 are corrected on start-up.
+- Task name, file, planned weight and start time that arrive after the print
+  status (typical after a reconnect) are filled in, instead of "Druck".
+- Running prints show the short printer name.
+
 ## [2.0.1] - 2026-09-25
 
 ### Changed
