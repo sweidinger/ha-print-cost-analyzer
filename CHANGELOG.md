@@ -1,5 +1,11 @@
 # Changelog
 
+## [2.0.1] - 2026-09-25
+
+### Changed
+- Printer names without the serial ha-bambulab appends ("H2D_0948…" -> "H2D"),
+  also for a print that was already running when updating.
+
 ## [2.0.0] - 2026-09-25
 
 Complete rewrite. Prints are now recorded automatically instead of by hand.

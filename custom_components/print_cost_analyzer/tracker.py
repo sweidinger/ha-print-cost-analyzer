@@ -51,7 +51,7 @@ class Printer:
                     self.siblings[suffix] = eid
             device = dr.async_get(hass).async_get(entry.device_id) if entry.device_id else None
             if device:
-                self.name = device.name_by_user or device.name or self.serial
+                self.name = _clean_name(device.name_by_user or device.name, self.serial)
         self._device_entities = [
             e.entity_id for e in er.async_entries_for_device(ent_reg, self.device_id)
         ] if self.device_id else []
@@ -244,6 +244,7 @@ class PrintTracker:
                                     "file", "makerworld_id", "started_at", "ended_at",
                                     "result", "planned_grams", "image", "partial")
         }
+        record["printer"] = printer.name
         record.update({
             "duration_s": int((ended - started).total_seconds()) if started and ended else None,
             "energy_kwh": energy,
@@ -327,6 +328,18 @@ class PrintTracker:
         await self._save()
         async_dispatcher_send(self.hass, SIGNAL_UPDATED)
         return True
+
+
+def _clean_name(name: str | None, serial: str) -> str:
+    """'H2D_0948BB520500417' -> 'H2D': ha-bambulab appends the serial to device names."""
+    if not name:
+        return serial
+    if serial:
+        for sep in ("_", " ", "-", ""):
+            suffix = f"{sep}{serial}"
+            if name.upper().endswith(suffix.upper()) and len(name) > len(suffix):
+                return name[: -len(suffix)].strip() or name
+    return name
 
 
 def _write(path: str, data: bytes) -> None:

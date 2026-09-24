@@ -175,3 +175,11 @@ async def test_booking_waits_for_the_settle_time(hass):
     async_fire_time_changed(hass, dt_util.utcnow() + timedelta(minutes=6))
     await hass.async_block_till_done()
     assert tracker.jobs[-1]["filaments"][0]["grams"] == 8.0
+
+
+def test_serial_is_cut_from_the_printer_name():
+    from custom_components.print_cost_analyzer.tracker import _clean_name
+    assert _clean_name("H2D_0948BB520500417", "0948BB520500417") == "H2D"
+    assert _clean_name("P1S 01P00C521601306", "01P00C521601306") == "P1S"
+    assert _clean_name("Werkstatt-Drucker", "0948BB520500417") == "Werkstatt-Drucker"
+    assert _clean_name("0948BB520500417", "0948BB520500417") == "0948BB520500417"
