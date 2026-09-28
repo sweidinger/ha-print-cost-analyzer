@@ -1,4 +1,6 @@
-from custom_components.print_cost_analyzer.costs import price_per_gram, spool_usage, summarize, to_kwh
+from custom_components.print_cost_analyzer.costs import (
+    price_per_gram, split_grams, spool_usage, spoolman_plausible, summarize, to_kwh,
+)
 
 
 def test_to_kwh():
@@ -33,3 +35,19 @@ def test_summarize_flags_missing_price():
     assert out["missing_price"] is True
     assert out["filament_cost"] is None
     assert out["total_cost"] == 0.15
+
+
+def test_spoolman_plausible():
+    assert spoolman_plausible({"1": 17.3}, 17.1)
+    assert spoolman_plausible({"1": 12.0, "2": 3.0}, 20.0)
+    assert not spoolman_plausible({}, 17.1)
+    assert not spoolman_plausible({"1": 30.0, "2": 10.0, "3": 10.0}, 17.1)   # far off
+    assert not spoolman_plausible({"1": 20.0}, 17.1)                         # 1 % steps
+    assert spoolman_plausible({"1": 20.0}, 20.3)
+
+
+def test_split_grams():
+    assert split_grams(17.1, ["16"], {"16": 10.0}) == {"16": 17.1}
+    assert split_grams(30.0, ["1", "2"], {"1": 20.0, "2": 10.0}) == {"1": 20.0, "2": 10.0}
+    assert split_grams(30.0, ["1", "2"], {}) == {"1": 15.0, "2": 15.0}
+    assert split_grams(30.0, [], {"1": 5.0}) == {}

@@ -19,6 +19,9 @@ SIGNAL_UPDATED = f"{DOMAIN}_updated"
 
 # print_status values reported by ha-bambulab
 ACTIVE_STATES = {"prepare", "running", "pause", "slicing", "init"}
+# Before the print proper the AMS may run through every slot to read the tags;
+# a tray seen active then was not necessarily printed with.
+PREP_STATES = {"prepare", "slicing", "init"}
 RESULT_FINISHED = "finish"
 RESULT_FAILED = "failed"
 
@@ -29,6 +32,7 @@ UID_GCODE = "_gcode_file_downloaded"
 UID_WEIGHT = "_print_weight"
 UID_START = "_start_time"
 UID_COVER = "_cover_image"
+UID_ACTIVE_TRAY = "_active_tray"
 
 IMAGE_DIR = "www/print_cost_analyzer"
 IMAGE_URL = "/local/print_cost_analyzer"

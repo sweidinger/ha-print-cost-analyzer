@@ -49,6 +49,24 @@
           "description": "ID des Drucks (aus der Karte oder dem Ereignis)."
         }
       }
+    },
+    "rebook_job": {
+      "name": "Filament neu buchen",
+      "description": "Bucht das Filament eines fertigen Drucks von Hand auf eine Spule, z. B. wenn die automatische Buchung falsch war.",
+      "fields": {
+        "job_id": {
+          "name": "Druck-ID",
+          "description": "ID des Drucks (aus der Karte oder dem Ereignis)."
+        },
+        "spool_id": {
+          "name": "Spule",
+          "description": "Spoolman-ID der verwendeten Spule."
+        },
+        "grams": {
+          "name": "Gramm",
+          "description": "Verbrauchtes Filament. Standard ist die Slicer-Schätzung."
+        }
+      }
     }
   }
 }

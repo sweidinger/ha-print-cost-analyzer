@@ -31,6 +31,13 @@ def _setup_printer(hass):
     hass.states.async_set("input_number.strompreis", "0.3")
 
 
+def _active(hass, tag, ams=None, tray=None, state="PLA"):
+    attrs = {"tray_uuid": tag}
+    if ams is not None:
+        attrs.update(ams_index=ams, tray_index=tray)
+    hass.states.async_set("sensor.h2d_active", state, attrs)
+
+
 def _spool(hass, sid, used, tray="", tag="", price=None):
     attrs = {"used_weight": used, "extra_active_tray": tray, "extra_tag": tag,
              "initial_weight": 1000, "filament_vendor_name": "Bambu Lab",
@@ -70,6 +77,8 @@ async def test_multicolour_print_is_costed_per_spool(hass):
     hass.states.async_set(STATUS, "running")
     await hass.async_block_till_done()
     assert len(tracker.active) == 1
+    _active(hass, "", 1, 0)                                       # spool 4's tray
+    await hass.async_block_till_done()
 
     # OpenSpoolMan books 12 g and 3 g, the plug counts 0.5 kWh; spool 9 is someone else's
     _spool(hass, 4, 112.0, tray=f"{SERIAL}_1_0", price=20.0)
@@ -164,6 +173,8 @@ async def test_booking_waits_for_the_settle_time(hass):
     from pytest_homeassistant_custom_component.common import async_fire_time_changed
 
     _setup_printer(hass)
+    hass.states.async_set("sensor.h2d_weight", "8.2")
+    _active(hass, "", 1, 0)
     _spool(hass, 4, 100.0, tray=f"{SERIAL}_1_0", price=20.0)
     tracker, _ = await _tracker(hass, settle=5)
     hass.states.async_set(STATUS, "running")
@@ -281,3 +292,69 @@ async def test_missing_meter_reading_is_taken_later(hass):
     await hass.async_block_till_done()
     await hass.async_block_till_done()
     assert tracker.jobs[-1]["energy_kwh"] == 0.2
+
+
+async def test_tag_reread_at_start_does_not_book_other_colours(hass):
+    """P1S, 28.09.26: single-colour print, the AMS re-reads all tags at the
+    start and Spoolman follows the AMS percentages in 10 g steps."""
+    _setup_printer(hass)
+    hass.states.async_set("sensor.h2d_weight", "17.1")
+    _active(hass, "", state="none")
+    _spool(hass, 2, 410.0, tray=f"{SERIAL}_0_0", tag="AAA2", price=25.19)
+    _spool(hass, 8, 830.0, tray=f"{SERIAL}_0_2", tag="AAA8", price=18.39)
+    _spool(hass, 16, 610.0, tray=f"{SERIAL}_0_3", tag="AAA16", price=11.98)
+    tracker, _ = await _tracker(hass)
+    hass.states.async_set(STATUS, "prepare")
+    await hass.async_block_till_done()
+    _active(hass, "AAA2", 0, 0)          # tag scan while preparing
+    await hass.async_block_till_done()
+    _active(hass, "", state="none")
+    hass.states.async_set(STATUS, "running")
+    await hass.async_block_till_done()
+    _spool(hass, 2, 440.0, tray=f"{SERIAL}_0_0", tag="AAA2", price=25.19)
+    _spool(hass, 8, 840.0, tray=f"{SERIAL}_0_2", tag="AAA8", price=18.39)
+    _active(hass, "AAA16", 0, 3)
+    await hass.async_block_till_done()
+    _spool(hass, 16, 620.0, tray=f"{SERIAL}_0_3", tag="AAA16", price=11.98)
+    _active(hass, "", state="none")
+    hass.states.async_set(STATUS, "finish")
+    await hass.async_block_till_done()
+    await hass.async_block_till_done()
+    job = tracker.jobs[-1]
+    assert job["filament_source"] == "slicer"
+    assert [(f["spool_id"], f["grams"]) for f in job["filaments"]] == [(16, 17.1)]
+    assert job["filament_cost"] == round(17.1 * 11.98 / 1000, 4)
+
+
+async def test_precise_booking_of_the_used_spool_is_kept(hass):
+    _setup_printer(hass)
+    _active(hass, "TAGA")
+    _spool(hass, 6, 50.0, tag="TAGA", price=25.0)
+    tracker, _ = await _tracker(hass)
+    hass.states.async_set(STATUS, "running")
+    await hass.async_block_till_done()
+    _spool(hass, 6, 68.4, tag="TAGA", price=25.0)       # slicer said 20 g
+    hass.states.async_set(STATUS, "finish")
+    await hass.async_block_till_done()
+    await hass.async_block_till_done()
+    job = tracker.jobs[-1]
+    assert job["filament_source"] == "spoolman"
+    assert job["filaments"][0]["grams"] == 18.4
+
+
+async def test_rebook_job(hass):
+    _setup_printer(hass)
+    _spool(hass, 16, 610.0, price=11.98)
+    tracker, _ = await _tracker(hass)
+    hass.states.async_set(STATUS, "running")
+    await hass.async_block_till_done()
+    hass.states.async_set(STATUS, "finish")
+    await hass.async_block_till_done()
+    await hass.async_block_till_done()
+    job_id = tracker.jobs[-1]["id"]
+    job = await tracker.async_rebook(job_id, 16, 17.1)
+    assert job["filament_source"] == "manual"
+    assert [(f["spool_id"], f["grams"]) for f in job["filaments"]] == [(16, 17.1)]
+    assert job["total_cost"] == round(job["energy_cost"] + 17.1 * 0.01198, 4)
+    job = await tracker.async_rebook(job_id, 16)                 # slicer weight
+    assert job["filaments"][0]["grams"] == 20.0

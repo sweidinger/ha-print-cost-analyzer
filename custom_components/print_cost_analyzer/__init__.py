@@ -14,6 +14,8 @@ from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse, callback
+from homeassistant.exceptions import HomeAssistantError
+import homeassistant.helpers.config_validation as cv
 
 from .const import (
     CARD_URL, CONF_ENERGY, CONF_PRICE_ENTITY, CONF_PRINTERS, CONF_SETTLE_MINUTES,
@@ -33,7 +35,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     await hass.http.async_register_static_paths([
         StaticPathConfig(CARD_URL, str(Path(__file__).parent / "frontend" / "print-cost-card.js"), False)
     ])
-    add_extra_js_url(hass, f"{CARD_URL}?v=2.0.3")
+    add_extra_js_url(hass, f"{CARD_URL}?v=2.1.0")
     websocket_api.async_register_command(hass, ws_jobs)
     return True
 
@@ -95,6 +97,24 @@ def _register_services(hass: HomeAssistant) -> None:
         if tracker:
             await tracker.async_delete(call.data["job_id"])
 
+    async def rebook_job(call: ServiceCall) -> ServiceResponse:
+        tracker = _tracker(hass)
+        if tracker is None:
+            raise HomeAssistantError("3D Print Cost Analyzer ist nicht eingerichtet")
+        try:
+            job = await tracker.async_rebook(
+                call.data["job_id"], call.data["spool_id"], call.data.get("grams"))
+        except ValueError as err:
+            raise HomeAssistantError(str(err)) from err
+        return {k: job.get(k) for k in ("id", "filament_grams", "filament_cost", "total_cost")}
+
+    hass.services.async_register(DOMAIN, "rebook_job", rebook_job,
+                                 schema=vol.Schema({
+                                     vol.Required("job_id"): cv.string,
+                                     vol.Required("spool_id"): vol.Coerce(int),
+                                     vol.Optional("grams"): vol.All(vol.Coerce(float), vol.Range(min=0.1)),
+                                 }),
+                                 supports_response=SupportsResponse.OPTIONAL)
     hass.services.async_register(DOMAIN, "export_csv", export_csv,
                                  supports_response=SupportsResponse.OPTIONAL)
     hass.services.async_register(DOMAIN, "delete_job", delete_job,

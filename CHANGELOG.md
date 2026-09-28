@@ -1,5 +1,21 @@
 # Changelog
 
+## [2.1.0] - 2026-09-28
+
+### Fixed
+- Only spools whose AMS tray actually fed the nozzle during the print are
+  costed. An AMS reading its tags at the start of a print corrects the
+  remaining weight of every loaded spool in Spoolman; those corrections were
+  booked as usage (a single-colour print showed up with three colours).
+- Spoolman figures that only move in 10 g steps (AMS remaining percentage of a
+  Bambu RFID spool) or that are far off the slicer's estimate are no longer
+  taken as usage of a finished print; the slicer's weight is spread over the
+  spools used instead.
+
+### Added
+- Service `print_cost_analyzer.rebook_job` to book a print's filament to one
+  spool by hand (defaults to the slicer's estimate).
+
 ## [2.0.3] - 2026-09-25
 
 ### Fixed

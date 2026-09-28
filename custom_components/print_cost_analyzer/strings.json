@@ -49,6 +49,24 @@
           "description": "ID of the print."
         }
       }
+    },
+    "rebook_job": {
+      "name": "Rebook filament",
+      "description": "Books the filament of a finished print to one spool by hand, e.g. when the automatic booking was wrong.",
+      "fields": {
+        "job_id": {
+          "name": "Print ID",
+          "description": "ID of the print."
+        },
+        "spool_id": {
+          "name": "Spool",
+          "description": "Spoolman ID of the spool that was used."
+        },
+        "grams": {
+          "name": "Grams",
+          "description": "Filament used. Defaults to the slicer's estimate."
+        }
+      }
     }
   }
 }

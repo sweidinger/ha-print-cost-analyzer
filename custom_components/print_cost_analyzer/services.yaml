@@ -5,3 +5,23 @@ delete_job:
       required: true
       selector:
         text:
+rebook_job:
+  fields:
+    job_id:
+      required: true
+      selector:
+        text:
+    spool_id:
+      required: true
+      selector:
+        number:
+          min: 1
+          mode: box
+    grams:
+      required: false
+      selector:
+        number:
+          min: 0.1
+          step: 0.1
+          unit_of_measurement: g
+          mode: box

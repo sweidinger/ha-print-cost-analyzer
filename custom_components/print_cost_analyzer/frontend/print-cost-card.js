@@ -95,7 +95,8 @@ class PrintCostCard extends HTMLElement {
           <span class="fn">#${f.spool_id ?? '–'} ${this._esc(f.name)}</span>
           <span>${this._num(f.grams, 1, 'g')}</span><span class="c">${this._eur(f.cost)}</span></div>`).join('');
       const notes = [
-        j.filament_source === 'slicer' ? 'Filament laut Slicer geschätzt – in Spoolman wurde nichts gebucht.' : '',
+        j.filament_source === 'slicer' ? 'Filament laut Slicer – die Buchung in Spoolman fehlte oder passte nicht zum Druck.' : '',
+        j.filament_source === 'manual' ? 'Filament von Hand nachgebucht.' : '',
         j.missing_price ? 'Für mindestens eine Spule fehlt der Preis in Spoolman.' : '',
         j.partial ? 'Beginn verpasst (HA war offline) – Strom nur teilweise erfasst.' : '',
       ].filter(Boolean).map(n => `<div class="note">${n}</div>`).join('');

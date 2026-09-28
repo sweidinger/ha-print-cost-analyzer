@@ -16,11 +16,13 @@ from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
 from .const import (
-    ACTIVE_STATES, EVENT_JOB_FINISHED, IMAGE_DIR, IMAGE_URL, RESULT_FAILED,
-    RESULT_FINISHED, SIGNAL_UPDATED, STORAGE_KEY, STORAGE_VERSION, UID_COVER,
-    UID_GCODE, UID_START, UID_STATUS, UID_TASK, UID_WEIGHT,
+    ACTIVE_STATES, EVENT_JOB_FINISHED, IMAGE_DIR, IMAGE_URL, PREP_STATES, RESULT_FAILED,
+    RESULT_FINISHED, SIGNAL_UPDATED, STORAGE_KEY, STORAGE_VERSION, UID_ACTIVE_TRAY,
+    UID_COVER, UID_GCODE, UID_START, UID_STATUS, UID_TASK, UID_WEIGHT,
 )
-from .costs import price_per_gram, spool_usage, summarize, to_kwh
+from .costs import (
+    price_per_gram, split_grams, spool_usage, spoolman_plausible, summarize, to_kwh,
+)
 
 _LOGGER = logging.getLogger(__name__)
 _SPOOL_RE = re.compile(r"^sensor\.spoolman_spool_(\d+)$")
@@ -43,7 +45,8 @@ class Printer:
         if entry and entry.unique_id.endswith(UID_STATUS):
             self.serial = entry.unique_id[: -len(UID_STATUS)]
             self.device_id = entry.device_id
-            for suffix in (UID_TASK, UID_GCODE, UID_WEIGHT, UID_START, UID_COVER):
+            for suffix in (UID_TASK, UID_GCODE, UID_WEIGHT, UID_START, UID_COVER,
+                           UID_ACTIVE_TRAY):
                 domain = "image" if suffix == UID_COVER else "sensor"
                 eid = ent_reg.async_get_entity_id(domain, entry.platform,
                                                   self.serial + suffix)
@@ -74,6 +77,20 @@ class Printer:
             if tag and tag.strip("0"):
                 tags.add(str(tag).upper())
         return tags
+
+    def active_tray(self, hass: HomeAssistant) -> tuple[str, str] | None:
+        """(tag, 'SERIAL_ams_tray') of the tray feeding the nozzle right now."""
+        eid = self.siblings.get(UID_ACTIVE_TRAY)
+        st = hass.states.get(eid) if eid else None
+        if st is None or st.state.lower() in ("", "none", "empty", "unknown", "unavailable"):
+            return None
+        a = st.attributes
+        tag = str(a.get("tray_uuid") or "").upper()
+        tag = tag if tag.strip("0") else ""
+        ams, tray = a.get("ams_index"), a.get("tray_index")
+        slot = f"{self.serial}_{ams}_{tray}" if self.serial and ams is not None \
+            and tray is not None else ""
+        return (tag, slot) if tag or slot else None
 
 
 class PrintTracker:
@@ -107,6 +124,13 @@ class PrintTracker:
         if self._meta_owner:
             self._unsubs.append(async_track_state_change_event(
                 self.hass, list(self._meta_owner), self._on_meta))
+        self._tray_owner = {
+            p.siblings[UID_ACTIVE_TRAY]: eid for eid, p in self.printers.items()
+            if UID_ACTIVE_TRAY in p.siblings
+        }
+        if self._tray_owner:
+            self._unsubs.append(async_track_state_change_event(
+                self.hass, list(self._tray_owner), self._on_tray))
         # Repair jobs that were taken for fresh starts although the printer
         # reports an earlier start (2.0.0/2.0.1 after a lost connection).
         for eid, job in self.active.items():
@@ -123,6 +147,7 @@ class PrintTracker:
         for eid, job in self.active.items():
             if eid in self.printers and not job.get("ended_at"):
                 self._refresh_meta(self.printers[eid], job)
+                self._note_tray(self.printers[eid], job)
         # Reconcile what happened while Home Assistant was not running.
         for eid, printer in self.printers.items():
             st = self.hass.states.get(eid)
@@ -168,6 +193,31 @@ class PrintTracker:
             # Also from unavailable: a printer that finished while it was
             # unreachable comes back straight as 'finish'.
             self.hass.async_create_task(self._end(printer, now))
+        elif job and not job.get("ended_at") and self._note_tray(printer, job):
+            self.hass.async_create_task(self._save())
+
+    @callback
+    def _on_tray(self, event: Event) -> None:
+        """Another AMS tray feeds the nozzle: remember it as used by the job."""
+        eid = self._tray_owner.get(event.data["entity_id"])
+        job = self.active.get(eid) if eid else None
+        if job and not job.get("ended_at") and self._note_tray(self.printers[eid], job):
+            self.hass.async_create_task(self._save())
+
+    def _note_tray(self, printer: Printer, job: dict[str, Any]) -> bool:
+        """Add the active tray to the job's used trays. True if it was new."""
+        if job.get("ended_at") or _state(self.hass, printer.status_entity) in PREP_STATES:
+            return False
+        active = printer.active_tray(self.hass)
+        if active is None:
+            return False
+        changed = False
+        for key, value in zip(("used_tags", "used_trays"), active):
+            seen = job.setdefault(key, [])
+            if value and value not in seen:
+                seen.append(value)
+                changed = True
+        return changed
 
     @callback
     def _on_meta(self, event: Event) -> None:
@@ -244,8 +294,11 @@ class PrintTracker:
             "energy_start": self._energy(printer),
             "spools_start": self._spool_snapshot(printer),
             "tags_seen": sorted(printer.tray_tags(hass)),
+            "used_tags": [],
+            "used_trays": [],
             "partial": partial,
         }
+        self._note_tray(printer, job)
         self.active[printer.status_entity] = job
         _LOGGER.info("%s: print started - %s", printer.name, job["name"])
         await self._save()
@@ -286,37 +339,7 @@ class PrintTracker:
         if not job or printer is None:
             return
         after = self._spool_snapshot(printer, extra=job["spools_start"])
-        used = spool_usage(
-            {k: v["used"] for k, v in job["spools_start"].items()},
-            {k: v["used"] for k, v in after.items()},
-        )
-        filaments = []
-        for sid, grams in used.items():
-            meta = after.get(sid) or job["spools_start"][sid]
-            ppg = meta.get("ppg")
-            filaments.append({
-                "spool_id": int(sid), "name": meta.get("name"), "color": meta.get("color"),
-                "material": meta.get("material"), "grams": grams,
-                "price_per_g": round(ppg, 5) if ppg else None,
-                "cost": round(grams * ppg, 4) if ppg else None,
-            })
-        source = "spoolman"
-        if not filaments and job.get("planned_grams") and job["result"] == "finished":
-            # Nothing was booked to Spoolman - fall back to the slicer's estimate,
-            # priced with the spool that was loaded when the print began.
-            source = "slicer"
-            grams = job["planned_grams"]
-            meta = next((m for m in job["spools_start"].values()
-                         if m.get("tag") in job.get("tags_seen", [])), None)
-            ppg = meta.get("ppg") if meta else None
-            filaments.append({
-                "spool_id": int(meta["id"]) if meta else None,
-                "name": meta.get("name") if meta else "laut Slicer",
-                "color": meta.get("color") if meta else None,
-                "material": meta.get("material") if meta else None,
-                "grams": grams, "price_per_g": ppg,
-                "cost": round(grams * ppg, 4) if ppg else None,
-            })
+        filaments, source = _book_filaments(job, after)
         e0, e1 = job.get("energy_start"), job.get("energy_end")
         energy = round(e1 - e0, 4) if e0 is not None and e1 is not None and e1 >= e0 else None
         price = _float(_state(self.hass, self.price_entity))
@@ -361,25 +384,13 @@ class PrintTracker:
             m = _SPOOL_RE.match(st.entity_id)
             if not m:
                 continue
-            a = st.attributes
-            sid = m.group(1)
-            tray = str(a.get("extra_active_tray") or "").strip('"')
-            tag = str(a.get("extra_tag") or "").strip('"').upper()
+            meta = _spool_meta(m.group(1), st)
+            if meta is None:
+                continue
+            tray, tag = meta["tray"], meta["tag"]
             mine = (printer.serial and tray.startswith(printer.serial + "_")) or (tag and tag in tags)
-            if not mine and sid not in keep:
-                continue
-            used = _float(a.get("used_weight"))
-            if used is None:
-                continue
-            out[sid] = {
-                "id": sid, "used": used, "tag": tag,
-                "name": " ".join(x for x in (a.get("filament_vendor_name"),
-                                              a.get("filament_material"),
-                                              a.get("filament_name")) if x) or a.get("friendly_name"),
-                "material": a.get("filament_material"),
-                "color": a.get("filament_color_hex") or (a.get("filament_multi_color_hexes") or "").split(",")[0] or None,
-                "ppg": price_per_gram(dict(a)),
-            }
+            if mine or meta["id"] in keep:
+                out[meta["id"]] = meta
         return out
 
     async def _save_cover(self, printer: Printer, job_id: str) -> str | None:
@@ -403,6 +414,26 @@ class PrintTracker:
             return None
 
     # -- maintenance -------------------------------------------------------
+    async def async_rebook(self, job_id: str, spool_id: int,
+                           grams: float | None = None) -> dict[str, Any]:
+        """Book a finished print's filament to one spool by hand."""
+        job = next((j for j in self.jobs if j.get("id") == job_id), None)
+        if job is None:
+            raise ValueError(f"Kein Druck mit ID {job_id}")
+        grams = grams if grams is not None else job.get("planned_grams")
+        if not grams or grams <= 0:
+            raise ValueError("Keine Grammzahl angegeben und keine Slicer-Schätzung vorhanden")
+        st = self.hass.states.get(f"sensor.spoolman_spool_{spool_id}")
+        meta = _spool_meta(str(spool_id), st) if st else None
+        if meta is None:
+            raise ValueError(f"Spule {spool_id} nicht in Spoolman gefunden")
+        job["filaments"] = [_filament(str(spool_id), round(float(grams), 2), meta)]
+        job["filament_source"] = "manual"
+        job.update(summarize(job.get("energy_kwh"), job.get("energy_price"), job["filaments"]))
+        await self._save()
+        async_dispatcher_send(self.hass, SIGNAL_UPDATED)
+        return job
+
     async def async_delete(self, job_id: str) -> bool:
         before = len(self.jobs)
         self.jobs = [j for j in self.jobs if j.get("id") != job_id]
@@ -411,6 +442,73 @@ class PrintTracker:
         await self._save()
         async_dispatcher_send(self.hass, SIGNAL_UPDATED)
         return True
+
+
+def _book_filaments(job: dict[str, Any], after: dict[str, dict[str, Any]]
+                    ) -> tuple[list[dict[str, Any]], str | None]:
+    """Grams and cost per spool of a settled job, and where the grams came from.
+
+    Only spools whose tray fed the nozzle during the print count, so an AMS that
+    re-reads its tags (and corrects the remaining weight of every spool) at the
+    start of a print no longer books the other colours. Spoolman's figures are
+    taken when they fit the slicer's estimate; otherwise the slicer's weight is
+    spread over the spools used.
+    """
+    start = job["spools_start"]
+    known = {**start, **after}
+    used = spool_usage({k: v["used"] for k, v in start.items()},
+                       {k: v["used"] for k, v in after.items()})
+    tags, trays = set(job.get("used_tags") or []), set(job.get("used_trays") or [])
+    active = sorted(
+        sid for sid, m in known.items()
+        if (m.get("tag") and m["tag"] in tags) or (m.get("tray") and m["tray"] in trays)
+    )
+    if active:
+        used = {sid: g for sid, g in used.items() if sid in active}
+    planned = job.get("planned_grams") if job.get("result") == "finished" else None
+    if not planned or spoolman_plausible(used, planned):
+        return [_filament(sid, g, known[sid]) for sid, g in used.items()], \
+            "spoolman" if used else None
+    targets = active or sorted(used)
+    if not targets:
+        # Nothing known about the trays: only a single loaded spool is a safe guess.
+        loaded = [sid for sid, m in start.items() if m.get("tag") in job.get("tags_seen", [])]
+        targets = loaded if len(loaded) == 1 else []
+    grams = split_grams(planned, targets, used)
+    if grams:
+        return [_filament(sid, g, known[sid]) for sid, g in grams.items()], "slicer"
+    return [{"spool_id": None, "name": "laut Slicer", "color": None, "material": None,
+             "grams": planned, "price_per_g": None, "cost": None}], "slicer"
+
+
+def _filament(sid: str, grams: float, meta: dict[str, Any]) -> dict[str, Any]:
+    ppg = meta.get("ppg")
+    return {
+        "spool_id": int(sid), "name": meta.get("name"), "color": meta.get("color"),
+        "material": meta.get("material"), "grams": grams,
+        "price_per_g": round(ppg, 5) if ppg else None,
+        "cost": round(grams * ppg, 4) if ppg else None,
+    }
+
+
+def _spool_meta(sid: str, st: State) -> dict[str, Any] | None:
+    """What the cost of a spool needs, from its Spoolman sensor."""
+    a = st.attributes
+    used = _float(a.get("used_weight"))
+    if used is None:
+        return None
+    return {
+        "id": sid, "used": used,
+        "tag": str(a.get("extra_tag") or "").strip('"').upper(),
+        "tray": str(a.get("extra_active_tray") or "").strip('"'),
+        "name": " ".join(x for x in (a.get("filament_vendor_name"),
+                                      a.get("filament_material"),
+                                      a.get("filament_name")) if x) or a.get("friendly_name"),
+        "material": a.get("filament_material"),
+        "color": a.get("filament_color_hex")
+        or (a.get("filament_multi_color_hexes") or "").split(",")[0] or None,
+        "ppg": price_per_gram(dict(a)),
+    }
 
 
 def _clean_name(name: str | None, serial: str) -> str:
