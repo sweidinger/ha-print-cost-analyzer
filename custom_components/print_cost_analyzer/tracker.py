@@ -1,4 +1,8 @@
-"""Print job tracking: follows each printer, snapshots at start, settles at end."""
+"""Print job tracking: follows each printer, snapshots at start, settles at end.
+
+Between prints it also records idle phases: the time a printer is switched on
+without printing, with the energy it drew meanwhile.
+"""
 from __future__ import annotations
 
 import logging
@@ -16,9 +20,10 @@ from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
 from .const import (
-    ACTIVE_STATES, EVENT_JOB_FINISHED, IMAGE_DIR, IMAGE_URL, PREP_STATES, RESULT_FAILED,
-    RESULT_FINISHED, SIGNAL_UPDATED, STORAGE_KEY, STORAGE_VERSION, UID_ACTIVE_TRAY,
-    UID_COVER, UID_GCODE, UID_START, UID_STATUS, UID_TASK, UID_WEIGHT,
+    ACTIVE_STATES, EVENT_JOB_FINISHED, IDLE_MIN_SECONDS, IDLE_RESUME_MINUTES, IMAGE_DIR,
+    IMAGE_URL, OFF_STATES, PREP_STATES, RESULT_FAILED, RESULT_FINISHED, SIGNAL_UPDATED,
+    STORAGE_KEY, STORAGE_VERSION, UID_ACTIVE_TRAY, UID_COVER, UID_GCODE, UID_START,
+    UID_STATUS, UID_TASK, UID_WEIGHT,
 )
 from .costs import (
     price_per_gram, split_grams, spool_usage, spoolman_plausible, summarize, to_kwh,
@@ -105,6 +110,8 @@ class PrintTracker:
         self._store: Store = Store(hass, STORAGE_VERSION, STORAGE_KEY)
         self.jobs: list[dict[str, Any]] = []
         self.active: dict[str, dict[str, Any]] = {}
+        self.idle: list[dict[str, Any]] = []
+        self.idle_active: dict[str, dict[str, Any]] = {}
         self._unsubs: list = []
         self._timers: dict[str, Any] = {}
 
@@ -113,6 +120,8 @@ class PrintTracker:
         data = await self._store.async_load() or {}
         self.jobs = data.get("jobs", [])
         self.active = data.get("active", {})
+        self.idle = data.get("idle", [])
+        self.idle_active = data.get("idle_active", {})
         await self.hass.async_add_executor_job(
             os.makedirs, self.hass.config.path(IMAGE_DIR), 0o755, True)
         self._unsubs.append(async_track_state_change_event(
@@ -159,6 +168,16 @@ class PrintTracker:
                 await self._end(printer, state or "unknown")
             elif not job and state in ACTIVE_STATES:
                 await self._begin(printer, partial=True)
+        # Idle phases: one that was open is closed if the printer is off now;
+        # a printer that is on and not printing gets one (start time unknown).
+        for eid, printer in self.printers.items():
+            state = _state(self.hass, eid)
+            if eid in self.idle_active and state in OFF_STATES:
+                await self._close_idle(printer, "off", partial=True)
+            elif eid not in self.idle_active and eid not in self.active \
+                    and state not in ACTIVE_STATES and state not in OFF_STATES \
+                    and state not in (None, "unknown"):
+                await self._open_idle(printer, partial=True)
 
     async def async_stop(self) -> None:
         for unsub in self._unsubs:
@@ -168,7 +187,8 @@ class PrintTracker:
         await self._save()
 
     async def _save(self) -> None:
-        await self._store.async_save({"jobs": self.jobs, "active": self.active})
+        await self._store.async_save({"jobs": self.jobs, "active": self.active,
+                                      "idle": self.idle, "idle_active": self.idle_active})
 
     # -- state machine -----------------------------------------------------
     @callback
@@ -195,6 +215,14 @@ class PrintTracker:
             self.hass.async_create_task(self._end(printer, now))
         elif job and not job.get("ended_at") and self._note_tray(printer, job):
             self.hass.async_create_task(self._save())
+        # Idle phases. A print's start and end open and close them in _begin/_end;
+        # here: the printer is switched off, or switched on without printing.
+        if now in OFF_STATES and eid in self.idle_active:
+            self.hass.async_create_task(self._close_idle(printer, "off"))
+        elif (not job or job.get("ended_at")) and eid not in self.idle_active \
+                and now not in ACTIVE_STATES \
+                and now not in OFF_STATES and now != "unknown":
+            self.hass.async_create_task(self._open_idle(printer, resume=was in OFF_STATES))
 
     @callback
     def _on_tray(self, event: Event) -> None:
@@ -274,6 +302,7 @@ class PrintTracker:
 
     async def _begin(self, printer: Printer, partial: bool = False) -> None:
         hass = self.hass
+        await self._close_idle(printer, "print")
         start_raw = printer.sibling_state(hass, UID_START)
         # The printer's own start time is only trusted when we missed the start
         # (HA was down): at a live start it may still show the previous print.
@@ -314,6 +343,9 @@ class PrintTracker:
                          else "failed" if state == RESULT_FAILED else "cancelled")
         job["energy_end"] = self._energy(printer)
         job["image"] = await self._save_cover(printer, job["id"])
+        if state not in OFF_STATES:
+            # The printer stays on after the print: from here it is idle.
+            await self._open_idle(printer, started=job["ended_at"], energy=job["energy_end"])
         await self._save()
         self._schedule_settle(printer.status_entity)
 
@@ -365,6 +397,99 @@ class PrintTracker:
                      record["name"], record["total_cost"] or 0)
         self.hass.bus.async_fire(EVENT_JOB_FINISHED, record)
         async_dispatcher_send(self.hass, SIGNAL_UPDATED)
+
+    # -- idle phases -------------------------------------------------------
+    async def _open_idle(self, printer: Printer, partial: bool = False,
+                         started: str | None = None, energy: float | None = None,
+                         resume: bool = False) -> None:
+        """The printer is on and not printing: start (or continue) an idle phase."""
+        eid = printer.status_entity
+        if eid in self.idle_active:
+            return
+        session = self._resumable_idle(eid) if resume else None
+        if session is None:
+            session = {
+                "id": uuid.uuid4().hex[:12],
+                "printer": printer.name,
+                "printer_entity": eid,
+                "started_at": started or dt_util.utcnow().isoformat(),
+                "energy_start": energy if energy is not None else self._energy(printer),
+                "partial": partial,
+            }
+        self.idle_active[eid] = session
+        await self._save()
+        async_dispatcher_send(self.hass, SIGNAL_UPDATED)
+
+    def _resumable_idle(self, eid: str) -> dict[str, Any] | None:
+        """The idle phase this printer dropped off from a moment ago, taken back."""
+        for i in range(len(self.idle) - 1, -1, -1):
+            rec = self.idle[i]
+            if rec.get("printer_entity") != eid:
+                continue
+            ended = dt_util.parse_datetime(rec.get("ended_at") or "")
+            if rec.get("end_reason") != "off" or rec.get("energy_start") is None or ended is None \
+                    or dt_util.utcnow() - ended > timedelta(minutes=IDLE_RESUME_MINUTES):
+                return None
+            self.idle.pop(i)
+            return {k: rec.get(k) for k in ("id", "printer", "printer_entity", "started_at",
+                                            "energy_start", "partial")}
+        return None
+
+    async def _close_idle(self, printer: Printer, reason: str, partial: bool = False) -> None:
+        """End the printer's idle phase and book its energy ('print' or 'off')."""
+        session = self.idle_active.pop(printer.status_entity, None)
+        if session is None:
+            return
+        ended = dt_util.utcnow()
+        started = dt_util.parse_datetime(session["started_at"])
+        duration = int((ended - started).total_seconds()) if started else None
+        e0, e1 = session.get("energy_start"), self._energy(printer)
+        energy = round(e1 - e0, 4) if e0 is not None and e1 is not None and e1 >= e0 else None
+        if (duration or 0) < IDLE_MIN_SECONDS and not (energy and energy >= 0.001):
+            await self._save()
+            return
+        price = _float(_state(self.hass, self.price_entity))
+        cost = round(energy * price, 4) if energy is not None and price is not None else None
+        self.idle.append({
+            "id": session["id"],
+            "type": "idle",
+            "name": "Leerlauf",
+            "result": "idle",
+            "printer": printer.name,
+            "printer_entity": printer.status_entity,
+            "started_at": session["started_at"],
+            "ended_at": ended.isoformat(),
+            "duration_s": duration,
+            "end_reason": reason,
+            "energy_start": e0,
+            "energy_end": e1,
+            "energy_kwh": energy,
+            "energy_price": price,
+            "energy_cost": cost,
+            "total_cost": cost,
+            "partial": bool(session.get("partial") or partial),
+        })
+        await self._save()
+        _LOGGER.debug("%s: idle phase booked - %s s, %s kWh", printer.name, duration, energy)
+        async_dispatcher_send(self.hass, SIGNAL_UPDATED)
+
+    def idle_running(self) -> list[dict[str, Any]]:
+        """Open idle phases with what they have drawn so far."""
+        price = _float(_state(self.hass, self.price_entity))
+        out = []
+        for eid, session in self.idle_active.items():
+            printer = self.printers.get(eid)
+            e0 = session.get("energy_start")
+            e1 = self._energy(printer) if printer else None
+            energy = round(e1 - e0, 4) if e0 is not None and e1 is not None and e1 >= e0 else None
+            out.append({
+                **session,
+                "printer": printer.name if printer else session.get("printer"),
+                "energy_kwh": energy,
+                "energy_cost": round(energy * price, 4)
+                if energy is not None and price is not None else None,
+            })
+        return out
 
     # -- data sources ------------------------------------------------------
     def _energy(self, printer: Printer) -> float | None:
@@ -435,9 +560,11 @@ class PrintTracker:
         return job
 
     async def async_delete(self, job_id: str) -> bool:
-        before = len(self.jobs)
+        """Remove a print or an idle phase by its id."""
+        before = len(self.jobs) + len(self.idle)
         self.jobs = [j for j in self.jobs if j.get("id") != job_id]
-        if len(self.jobs) == before:
+        self.idle = [j for j in self.idle if j.get("id") != job_id]
+        if len(self.jobs) + len(self.idle) == before:
             return False
         await self._save()
         async_dispatcher_send(self.hass, SIGNAL_UPDATED)

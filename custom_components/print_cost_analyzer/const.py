@@ -22,6 +22,15 @@ ACTIVE_STATES = {"prepare", "running", "pause", "slicing", "init"}
 # Before the print proper the AMS may run through every slot to read the tags;
 # a tray seen active then was not necessarily printed with.
 PREP_STATES = {"prepare", "slicing", "init"}
+# The printer is switched off (smart plug) or unreachable: an idle phase ends.
+# "unknown" is left out on purpose, it shows up briefly during reloads.
+OFF_STATES = {"offline", "unavailable"}
+# Idle phases shorter than this without measurable energy are not kept
+# (status flicker, a print following straight on the previous one).
+IDLE_MIN_SECONDS = 60
+# A printer back within this time after dropping off continues its idle phase
+# (lost connection, integration reload) instead of starting a new one.
+IDLE_RESUME_MINUTES = 5
 RESULT_FINISHED = "finish"
 RESULT_FAILED = "failed"
 

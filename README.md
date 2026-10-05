@@ -23,6 +23,12 @@ integration it follows the print status:
 Prints running while Home Assistant restarts are resumed; a print that finished
 while HA was down is booked on start-up.
 
+Between prints it records **idle phases**: from the end of a print (or a printer
+switched on without printing) until the next print or until the printer goes
+offline, e.g. because its plug switched it off. Each phase is booked with its
+kWh × price. Phases under a minute without measurable energy are dropped; a
+printer that is unreachable for less than 5 minutes continues its phase.
+
 ## Installation
 
 HACS → Integrations → ⋮ → Custom repositories → this repository (type Integration),
@@ -44,13 +50,20 @@ title: 3D-Druckkosten
 It lists every print with picture, printer, time, duration and total; tap a print
 for electricity, filament per spool and the total. Filter by printer and month.
 
+Switch the view to *Leerlauf* (or tap the *Leerlauf* figure) for the idle phases:
+printer, start, duration, kWh and cost of each, and the printers idling now. Use
+`view: idle` to start a card in that view.
+
 ## Entities, services, events
 
 - `sensor.druckkosten_gesamt`, `sensor.druckkosten_diesen_monat` – with energy and
   filament split as attributes
 - `sensor.anzahl_drucke`, `sensor.letzter_druck`
+- `sensor.leerlaufkosten_gesamt`, `sensor.leerlaufkosten_diesen_monat` – idle
+  electricity, with phases, kWh, hours and cost per printer as attributes
 - `print_cost_analyzer.export_csv` – writes `/config/print_cost_analyzer.csv`
-- `print_cost_analyzer.delete_job` – removes a print by id
+  (prints and idle phases)
+- `print_cost_analyzer.delete_job` – removes a print or an idle phase by id
 - Event `print_cost_analyzer_job_finished` – fired with the full record of each print
 
 ## Requirements

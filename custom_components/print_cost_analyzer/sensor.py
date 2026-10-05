@@ -20,6 +20,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry,
         CostSensor(tracker, entry, "month", "Druckkosten diesen Monat"),
         CountSensor(tracker, entry),
         LastPrintSensor(tracker, entry),
+        IdleCostSensor(tracker, entry, "total", "Leerlaufkosten gesamt"),
+        IdleCostSensor(tracker, entry, "month", "Leerlaufkosten diesen Monat"),
     ])
 
 
@@ -71,6 +73,48 @@ class CostSensor(_Base):
             "filament_cost": round(sum(j.get("filament_cost") or 0 for j in jobs), 2),
             "energy_kwh": round(sum(j.get("energy_kwh") or 0 for j in jobs), 3),
             "filament_grams": round(sum(j.get("filament_grams") or 0 for j in jobs), 1),
+        }
+
+
+def _this_month(records):
+    month = dt_util.now().strftime("%Y-%m")
+    return [r for r in records
+            if dt_util.as_local(dt_util.parse_datetime(r["started_at"])).strftime("%Y-%m") == month]
+
+
+class IdleCostSensor(_Base):
+    """Electricity the printers drew while switched on without printing."""
+
+    _attr_native_unit_of_measurement = "EUR"
+    _attr_suggested_display_precision = 2
+    _attr_icon = "mdi:power-sleep"
+
+    def __init__(self, tracker, entry, period: str, name: str) -> None:
+        super().__init__(tracker, entry, f"idle_cost_{period}", name)
+        self.period = period
+        self._attr_state_class = (SensorStateClass.TOTAL if period == "month"
+                                  else SensorStateClass.TOTAL_INCREASING)
+
+    def _phases(self):
+        return self.tracker.idle if self.period == "total" else _this_month(self.tracker.idle)
+
+    @property
+    def native_value(self) -> float:
+        return round(sum(r.get("energy_cost") or 0 for r in self._phases()), 2)
+
+    @property
+    def extra_state_attributes(self):
+        phases = self._phases()
+        per_printer: dict[str, float] = {}
+        for r in phases:
+            per_printer[r.get("printer")] = round(
+                per_printer.get(r.get("printer"), 0) + (r.get("energy_cost") or 0), 4)
+        return {
+            "phases": len(phases),
+            "energy_kwh": round(sum(r.get("energy_kwh") or 0 for r in phases), 3),
+            "hours": round(sum(r.get("duration_s") or 0 for r in phases) / 3600, 1),
+            "per_printer": per_printer,
+            "idle_now": [r["printer"] for r in self.tracker.idle_running()],
         }
 
 

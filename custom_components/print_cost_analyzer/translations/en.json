@@ -38,11 +38,11 @@
   "services": {
     "export_csv": {
       "name": "Export CSV",
-      "description": "Writes all prints to /config/print_cost_analyzer.csv."
+      "description": "Writes all prints and idle phases to /config/print_cost_analyzer.csv."
     },
     "delete_job": {
       "name": "Delete print",
-      "description": "Removes a print from the history.",
+      "description": "Removes a print or an idle phase from the history.",
       "fields": {
         "job_id": {
           "name": "Print ID",

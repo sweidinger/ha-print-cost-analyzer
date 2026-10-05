@@ -1,5 +1,22 @@
 # Changelog
 
+## [2.2.0] - 2026-10-05
+
+### Added
+- Idle phases: the time a printer is switched on without printing and the
+  electricity it draws meanwhile. A phase starts when a print ends or when a
+  printer comes on without printing, and ends with the next print or when the
+  printer goes offline (e.g. switched off by its smart plug). A printer that
+  drops off for less than 5 minutes (lost connection) continues its phase.
+- The card has a view switch *Drucke / Leerlauf*: the idle view lists every
+  phase with printer, time, duration, kWh and cost, shows printers idling right
+  now, and filters by printer and month like the prints. The print view gets a
+  *Leerlauf* figure that opens it. New card option `view: idle`.
+- Sensors `sensor.leerlaufkosten_gesamt` and `sensor.leerlaufkosten_diesen_monat`
+  (attributes: phases, kWh, hours, cost per printer, printers idling now).
+- `export_csv` includes the idle phases (name `Leerlauf`, result `idle`);
+  `delete_job` also removes an idle phase by its id.
+
 ## [2.1.0] - 2026-09-28
 
 ### Fixed

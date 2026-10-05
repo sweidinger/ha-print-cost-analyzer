@@ -38,11 +38,11 @@
   "services": {
     "export_csv": {
       "name": "Als CSV exportieren",
-      "description": "Schreibt alle Drucke nach /config/print_cost_analyzer.csv."
+      "description": "Schreibt alle Drucke und Leerlaufphasen nach /config/print_cost_analyzer.csv."
     },
     "delete_job": {
       "name": "Druck löschen",
-      "description": "Entfernt einen Druck aus der Historie.",
+      "description": "Entfernt einen Druck oder eine Leerlaufphase aus der Historie.",
       "fields": {
         "job_id": {
           "name": "Druck-ID",

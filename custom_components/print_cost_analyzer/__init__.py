@@ -35,7 +35,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     await hass.http.async_register_static_paths([
         StaticPathConfig(CARD_URL, str(Path(__file__).parent / "frontend" / "print-cost-card.js"), False)
     ])
-    add_extra_js_url(hass, f"{CARD_URL}?v=2.1.0")
+    add_extra_js_url(hass, f"{CARD_URL}?v=2.2.0")
     websocket_api.async_register_command(hass, ws_jobs)
     return True
 
@@ -83,14 +83,15 @@ def _register_services(hass: HomeAssistant) -> None:
         buf = io.StringIO()
         writer = csv.DictWriter(buf, fieldnames=CSV_FIELDS, delimiter=";", extrasaction="ignore")
         writer.writeheader()
-        for job in tracker.jobs if tracker else []:
+        for job in (tracker.jobs + tracker.idle) if tracker else []:
             row = dict(job)
             row["spools"] = " | ".join(
                 f"{f.get('name')}: {f.get('grams')} g" for f in job.get("filaments", []))
             writer.writerow(row)
         path = hass.config.path("print_cost_analyzer.csv")
         await hass.async_add_executor_job(Path(path).write_text, buf.getvalue(), "utf-8")
-        return {"path": path, "prints": len(tracker.jobs) if tracker else 0}
+        return {"path": path, "prints": len(tracker.jobs) if tracker else 0,
+                "idle_phases": len(tracker.idle) if tracker else 0}
 
     async def delete_job(call: ServiceCall) -> None:
         tracker = _tracker(hass)
@@ -124,10 +125,11 @@ def _register_services(hass: HomeAssistant) -> None:
 @websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/jobs"})
 @callback
 def ws_jobs(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
-    """All booked prints (newest first) and the ones still running."""
+    """All booked prints and idle phases (newest first), and the ones still running."""
     tracker = _tracker(hass)
     if tracker is None:
-        connection.send_result(msg["id"], {"jobs": [], "active": [], "printers": []})
+        connection.send_result(msg["id"], {"jobs": [], "active": [], "printers": [],
+                                           "idle": [], "idle_active": []})
         return
     active = [
         {**{k: v for k, v in job.items() if k not in ("spools_start", "tags_seen")},
@@ -137,5 +139,7 @@ def ws_jobs(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg
     connection.send_result(msg["id"], {
         "jobs": list(reversed(tracker.jobs)),
         "active": active,
+        "idle": list(reversed(tracker.idle)),
+        "idle_active": tracker.idle_running(),
         "printers": sorted({p.name for p in tracker.printers.values()}),
     })

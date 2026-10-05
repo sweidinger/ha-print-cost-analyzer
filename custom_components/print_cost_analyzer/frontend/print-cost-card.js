@@ -3,10 +3,12 @@
  * type: custom:print-cost-card
  * title: 3D-Druckkosten      # optional
  * page_size: 25              # optional, prints per "mehr anzeigen"
+ * view: jobs                 # optional, start with "jobs" (Drucke) or "idle" (Leerlauf)
  */
 class PrintCostCard extends HTMLElement {
   setConfig(config) {
-    this._cfg = Object.assign({ title: '3D-Druckkosten', page_size: 25 }, config || {});
+    this._cfg = Object.assign({ title: '3D-Druckkosten', page_size: 25, view: 'jobs' }, config || {});
+    this._view = this._view || (this._cfg.view === 'idle' ? 'idle' : 'jobs');
     this._printer = this._printer || '';
     this._month = this._month || '';
     this._open = this._open || null;
@@ -43,6 +45,8 @@ class PrintCostCard extends HTMLElement {
   }
 
   _click(ev) {
+    const sw = ev.target.closest('[data-view]');
+    if (sw) { this._view = sw.dataset.view; this._open = null; this._limit = this._cfg.page_size; this._render(); return; }
     const more = ev.target.closest('[data-more]');
     if (more) { this._limit += this._cfg.page_size; this._render(); return; }
     const row = ev.target.closest('[data-job]');
@@ -55,6 +59,7 @@ class PrintCostCard extends HTMLElement {
   _change(ev) {
     if (ev.target.id === 'printer') this._printer = ev.target.value;
     if (ev.target.id === 'month') this._month = ev.target.value;
+    if (ev.target.id === 'view') { this._view = ev.target.value; this._open = null; }
     this._limit = this._cfg.page_size;
     this._render();
   }
@@ -75,19 +80,59 @@ class PrintCostCard extends HTMLElement {
     return { finished: ['Fertig', 'ok'], failed: ['Fehlgeschlagen', 'bad'], cancelled: ['Abgebrochen', 'warn'] }[r] || [r || '–', 'warn'];
   }
 
+  _idleRow(j) {
+    const open = this._open === j.id;
+    const until = j.end_reason === 'print' ? 'bis zum nächsten Druck' : 'bis zum Abschalten';
+    const notes = [
+      j.partial ? 'Beginn oder Ende nicht beobachtet (HA war offline) – Dauer ungenau, Strom vollständig.' : '',
+      j.energy_kwh == null ? 'Kein Energiezähler-Wert – Strom nicht erfasst.' : '',
+    ].filter(Boolean).map(n => `<div class="note">${n}</div>`).join('');
+    return `
+      <div class="job ${open ? 'open' : ''}" data-job="${j.id}">
+        <div class="thumb idle"><ha-icon icon="mdi:power-sleep"></ha-icon></div>
+        <div class="main">
+          <div class="name">Leerlauf ${until}</div>
+          <div class="meta">${this._esc(j.printer)} · ${this._date(j.started_at)} · ${this._dur(j.duration_s)}</div>
+        </div>
+        <div class="right"><div class="total">${this._eur(j.energy_cost)}</div><span class="badge idle">${this._num(j.energy_kwh, 3, 'kWh')}</span></div>
+        ${open ? `
+        <div class="details">
+          <div class="grid">
+            <div><span>Beginn</span><b>${this._date(j.started_at)}</b></div>
+            <div><span>Ende</span><b>${this._date(j.ended_at)}</b></div>
+            <div><span>Dauer</span><b>${this._dur(j.duration_s)}</b></div>
+            <div><span>Drucker</span><b>${this._esc(j.printer)}</b></div>
+          </div>
+          <div class="sec">Strom</div>
+          <div class="line"><span>${this._num(j.energy_kwh, 3, 'kWh')} × ${this._num(j.energy_price, 4, '€/kWh')}</span><b>${this._eur(j.energy_cost)}</b></div>
+          <div class="line"><span>Ø Leistung</span><b>${j.energy_kwh != null && j.duration_s ? this._num(j.energy_kwh * 3600000 / j.duration_s, 0, 'W') : '–'}</b></div>
+          ${notes}
+          <div class="foot"><span></span><span class="id">ID ${j.id}</span></div>
+        </div>` : ''}
+      </div>`;
+  }
+
   _render() {
     if (!this.shadowRoot || !this._cfg) return;
-    const d = this._data || { jobs: [], active: [], printers: [] };
-    const months = [...new Set(d.jobs.map(j => this._monthKey(j.started_at)))];
+    const d = Object.assign({ jobs: [], active: [], printers: [], idle: [], idle_active: [] }, this._data || {});
+    const idleView = this._view === 'idle';
+    const months = [...new Set([...d.jobs, ...d.idle].map(j => j.started_at).sort().reverse().map(t => this._monthKey(t)))];
     const mName = k => { const [y, m] = k.split('-'); return new Date(y, m - 1, 1).toLocaleString('de-DE', { month: 'long', year: 'numeric' }); };
-    const jobs = d.jobs.filter(j => (!this._printer || j.printer === this._printer) && (!this._month || this._monthKey(j.started_at) === this._month));
+    const keep = j => (!this._printer || j.printer === this._printer) && (!this._month || this._monthKey(j.started_at) === this._month);
+    const jobs = d.jobs.filter(keep);
+    const idle = d.idle.filter(keep);
     const sum = k => jobs.reduce((a, j) => a + (j[k] || 0), 0);
+    const isum = k => idle.reduce((a, j) => a + (j[k] || 0), 0);
     const opt = (v, l, sel) => `<option value="${this._esc(v)}" ${sel ? 'selected' : ''}>${this._esc(l)}</option>`;
 
-    const running = d.active.filter(j => !j.ended_at).map(j => `
+    const running = idleView
+      ? d.idle_active.filter(j => !this._printer || j.printer === this._printer).map(j => `
+      <div class="run idle"><span class="dot"></span><span><b>${this._esc(j.printer)}</b> im Leerlauf seit ${this._date(j.started_at)} · bisher ${this._num(j.energy_kwh, 3, 'kWh')} / ${this._eur(j.energy_cost)}</span></div>`).join('')
+      : d.active.filter(j => !j.ended_at).map(j => `
       <div class="run"><span class="dot"></span><b>${this._esc(j.printer)}</b> druckt „${this._esc(j.name)}“ seit ${this._date(j.started_at)}</div>`).join('');
 
-    const rows = jobs.slice(0, this._limit).map(j => {
+    const list = idleView ? idle : jobs;
+    const rows = idleView ? idle.slice(0, this._limit).map(j => this._idleRow(j)).join('') : jobs.slice(0, this._limit).map(j => {
       const [rl, rc] = this._result(j.result);
       const open = this._open === j.id;
       const fil = (j.filaments || []).map(f => `
@@ -153,6 +198,12 @@ class PrintCostCard extends HTMLElement {
         .right { text-align:right; }
         .total { font-weight:600; }
         .badge { display:inline-block; margin-top:4px; font-size:.7rem; padding:1px 8px; border-radius:999px; }
+        .badge.idle { background:rgba(127,127,127,.16); }
+        .thumb.idle { color:var(--secondary-text-color); }
+        .run.idle { background:rgba(232,176,74,.14); }
+        .run.idle .dot { background:#e8b04a; box-shadow:0 0 0 4px rgba(232,176,74,.25); }
+        .kpi.link { cursor:pointer; } .kpi.link:hover { background:rgba(127,127,127,.14); }
+        .kpi.link span::after { content:' ›'; }
         .badge.ok { background:rgba(46,164,79,.18); } .badge.bad { background:rgba(214,74,74,.25); } .badge.warn { background:rgba(232,176,74,.25); }
         .details { grid-column:1 / -1; padding:6px 4px 4px 68px; cursor:default; }
         .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:8px; margin-bottom:8px; }
@@ -178,24 +229,32 @@ class PrintCostCard extends HTMLElement {
         <div class="head">
           <h2>${this._esc(this._cfg.title)}</h2>
           <div class="filters">
+            <select id="view">${opt('jobs', 'Drucke', !idleView)}${opt('idle', 'Leerlauf', idleView)}</select>
             <select id="printer">${opt('', 'Alle Drucker', !this._printer)}${d.printers.map(p => opt(p, p, p === this._printer)).join('')}</select>
             <select id="month">${opt('', 'Alle Monate', !this._month)}${months.map(m => opt(m, mName(m), m === this._month)).join('')}</select>
           </div>
         </div>
-        <div class="kpis">
+        <div class="kpis">${idleView ? `
+          <div class="kpi"><span>Leerlaufphasen</span><b>${idle.length}</b></div>
+          <div class="kpi"><span>Dauer</span><b>${this._dur(isum('duration_s'))}</b></div>
+          <div class="kpi"><span>Energie</span><b>${this._num(isum('energy_kwh'), 2, 'kWh')}</b></div>
+          <div class="kpi"><span>Kosten</span><b>${this._eur(isum('energy_cost'))}</b></div>` : `
           <div class="kpi"><span>Drucke</span><b>${jobs.length}</b></div>
           <div class="kpi"><span>Strom</span><b>${this._eur(sum('energy_cost'))}</b></div>
           <div class="kpi"><span>Filament</span><b>${this._eur(sum('filament_cost'))}</b></div>
           <div class="kpi"><span>Gesamt</span><b>${this._eur(sum('total_cost'))}</b></div>
+          <div class="kpi link" data-view="idle" title="Leerlaufphasen anzeigen"><span>Leerlauf</span><b>${this._eur(isum('energy_cost'))}</b></div>`}
         </div>
         ${running}
         ${this._err ? `<div class="err">Daten nicht lesbar: ${this._esc(this._err)}</div>` : ''}
-        ${rows || (this._err ? '' : '<div class="empty">Noch keine Drucke erfasst. Der nächste fertige Druck erscheint hier automatisch.</div>')}
-        ${jobs.length > this._limit ? `<div class="more" data-more>Weitere ${Math.min(this._cfg.page_size, jobs.length - this._limit)} anzeigen</div>` : ''}
+        ${rows || (this._err ? '' : idleView
+          ? '<div class="empty">Noch keine Leerlaufphasen erfasst. Eine beginnt mit dem nächsten Druckende oder wenn ein Drucker ohne Druck eingeschaltet ist.</div>'
+          : '<div class="empty">Noch keine Drucke erfasst. Der nächste fertige Druck erscheint hier automatisch.</div>')}
+        ${list.length > this._limit ? `<div class="more" data-more>Weitere ${Math.min(this._cfg.page_size, list.length - this._limit)} anzeigen</div>` : ''}
       </ha-card>`;
   }
 }
 
 if (!customElements.get('print-cost-card')) customElements.define('print-cost-card', PrintCostCard);
 window.customCards = window.customCards || [];
-window.customCards.push({ type: 'print-cost-card', name: '3D-Druckkosten', description: 'Alle Drucke mit Strom- und Filamentkosten (3D Print Cost Analyzer).' });
+window.customCards.push({ type: 'print-cost-card', name: '3D-Druckkosten', description: 'Alle Drucke mit Strom- und Filamentkosten und die Leerlaufphasen der Drucker (3D Print Cost Analyzer).' });
