@@ -31,7 +31,27 @@ from .costs import (
 
 _LOGGER = logging.getLogger(__name__)
 _SPOOL_RE = re.compile(r"^sensor\.spoolman_spool_(\d+)$")
-_MAKERWORLD_RE = re.compile(r"^(\d{4,})-")
+
+
+def _stem(name: str | None) -> str:
+    """Vergleichbarer Kern eines Auftrags-/Dateinamens: ha-bambulab stellt dem
+    heruntergeladenen G-Code die Dateigröße voran („21863866-Name.gcode“)."""
+    s = (name or "").lower()
+    s = re.sub(r"^\d+-", "", s)
+    s = re.sub(r"(\.gcode)?(\.3mf)?$", "", s)
+    s = re.sub(r"_plate_\d+$", "", s)
+    return re.sub(r"[^a-z0-9]+", "", s)
+
+
+def _meta_current(task: str | None, gcode: str | None) -> bool:
+    """Gehört der zuletzt heruntergeladene G-Code (samt Gewicht und Titelbild) zum
+    laufenden Auftrag? Startet der Druck aus dem SD-Wurzelverzeichnis (\"Senden\",
+    Druckstart aus HA), lädt ha-bambulab das Modell nicht nach und die Sensoren
+    zeigen noch den vorherigen Druck."""
+    a, b = _stem(task), _stem(gcode)
+    if not a or not b:
+        return True
+    return a in b or b in a
 
 
 class Printer:
@@ -266,17 +286,18 @@ class PrintTracker:
         changed = False
         task = printer.sibling_state(self.hass, UID_TASK)
         gcode = printer.sibling_state(self.hass, UID_GCODE)
+        current = _meta_current(task or job.get("name"), gcode)
+        if not current:
+            gcode = None
         if task and job.get("name") in (None, "", "Druck", job.get("file")):
             job["name"] = task
             changed = True
         if gcode and not job.get("file"):
             job["file"] = gcode
-            mw = _MAKERWORLD_RE.match(gcode)
-            job["makerworld_id"] = mw.group(1) if mw else None
             if job.get("name") in (None, "", "Druck"):
                 job["name"] = gcode
             changed = True
-        weight = _float(printer.sibling_state(self.hass, UID_WEIGHT))
+        weight = _float(printer.sibling_state(self.hass, UID_WEIGHT)) if current else None
         if weight and not job.get("planned_grams"):
             job["planned_grams"] = weight
             changed = True
@@ -309,17 +330,19 @@ class PrintTracker:
         parsed = dt_util.parse_datetime(start_raw) if start_raw else None
         started = parsed if (partial and parsed) else dt_util.utcnow()
         gcode = printer.sibling_state(hass, UID_GCODE) or ""
-        mw = _MAKERWORLD_RE.match(gcode)
+        task = printer.sibling_state(hass, UID_TASK)
+        current = _meta_current(task, gcode)
+        if not current:
+            gcode = ""
         job = {
             "id": uuid.uuid4().hex[:12],
             "printer": printer.name,
             "printer_entity": printer.status_entity,
             "serial": printer.serial,
-            "name": printer.sibling_state(hass, UID_TASK) or gcode or "Druck",
+            "name": task or gcode or "Druck",
             "file": gcode,
-            "makerworld_id": mw.group(1) if mw else None,
             "started_at": started.isoformat(),
-            "planned_grams": _float(printer.sibling_state(hass, UID_WEIGHT)),
+            "planned_grams": _float(printer.sibling_state(hass, UID_WEIGHT)) if current else None,
             "energy_start": self._energy(printer),
             "spools_start": self._spool_snapshot(printer),
             "tags_seen": sorted(printer.tray_tags(hass)),
@@ -342,7 +365,12 @@ class PrintTracker:
         job["result"] = ("finished" if state == RESULT_FINISHED
                          else "failed" if state == RESULT_FAILED else "cancelled")
         job["energy_end"] = self._energy(printer)
-        job["image"] = await self._save_cover(printer, job["id"])
+        # Titelbild nur, wenn die Modelldaten der Integration zu diesem Druck gehören
+        if _meta_current(printer.sibling_state(self.hass, UID_TASK) or job.get("name"),
+                         printer.sibling_state(self.hass, UID_GCODE)):
+            job["image"] = await self._save_cover(printer, job["id"])
+        else:
+            job["image"] = None
         if state not in OFF_STATES:
             # The printer stays on after the print: from here it is idle.
             await self._open_idle(printer, started=job["ended_at"], energy=job["energy_end"])
@@ -379,7 +407,7 @@ class PrintTracker:
         ended = dt_util.parse_datetime(job["ended_at"])
         record = {
             k: job.get(k) for k in ("id", "printer", "printer_entity", "serial", "name",
-                                    "file", "makerworld_id", "started_at", "ended_at",
+                                    "file", "started_at", "ended_at",
                                     "result", "planned_grams", "image", "partial")
         }
         record["printer"] = printer.name

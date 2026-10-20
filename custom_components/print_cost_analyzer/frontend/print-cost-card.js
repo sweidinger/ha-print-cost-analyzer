@@ -145,7 +145,6 @@ class PrintCostCard extends HTMLElement {
         j.missing_price ? 'Für mindestens eine Spule fehlt der Preis in Spoolman.' : '',
         j.partial ? 'Beginn verpasst (HA war offline) – Strom nur teilweise erfasst.' : '',
       ].filter(Boolean).map(n => `<div class="note">${n}</div>`).join('');
-      const mw = j.makerworld_id ? `<a href="https://makerworld.com/de/models/${j.makerworld_id}" target="_blank" rel="noreferrer">Modell auf MakerWorld ↗</a>` : '';
       return `
         <div class="job ${open ? 'open' : ''}" data-job="${j.id}">
           <div class="thumb">${j.image ? `<img src="${this._esc(j.image)}" loading="lazy" alt="">` : '<ha-icon icon="mdi:printer-3d"></ha-icon>'}</div>
@@ -169,7 +168,7 @@ class PrintCostCard extends HTMLElement {
             <div class="line sum"><span>Filament gesamt</span><b>${this._eur(j.filament_cost)}</b></div>
             <div class="line total2"><span>Druck gesamt</span><b>${this._eur(j.total_cost)}</b></div>
             ${notes}
-            <div class="foot">${mw}<span class="id">ID ${j.id}${j.file ? ' · ' + this._esc(j.file) : ''}</span></div>
+            <div class="foot"><span></span><span class="id">ID ${j.id}${j.file ? ' · ' + this._esc(j.file) : ''}</span></div>
           </div>` : ''}
         </div>`;
     }).join('');

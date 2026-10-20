@@ -1,5 +1,11 @@
 # Changelog
 
+## [2.2.1] - 2026-10-20
+
+### Fixed
+- Removed the "Modell auf MakerWorld" link: the number in front of the downloaded G-code name (e.g. `21863866-Name.gcode`) is the file size ha-bambulab prepends, not a MakerWorld model ID.
+- Stale model data: when a print starts from the SD root ("Send" in Bambu Studio, or a start via MQTT from Home Assistant), ha-bambulab does not download the new model, so the downloaded G-code name, the slicer weight and the cover image still belong to the previous print. A job now only takes over file name, planned grams and cover image when the downloaded G-code matches the task name.
+
 ## [2.2.0] - 2026-10-05
 
 ### Added

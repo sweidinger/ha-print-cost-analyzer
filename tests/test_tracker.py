@@ -93,7 +93,7 @@ async def test_multicolour_print_is_costed_per_spool(hass):
     job = tracker.jobs[-1]
     assert job["result"] == "finished"
     assert job["name"] == "Key Holder_plate_1"
-    assert job["makerworld_id"] == "31879733"
+    assert job["file"] == "31879733-Key Holder_plate_1.gcode"
     assert job["energy_kwh"] == 0.5
     assert job["energy_cost"] == 0.15
     grams = {f["spool_id"]: f["grams"] for f in job["filaments"]}
@@ -241,7 +241,7 @@ async def test_late_metadata_is_filled_in(hass):
     hass.states.async_set("sensor.h2d_start", "2026-09-24T17:32:00+00:00")
     await hass.async_block_till_done()
     assert job["name"] == "Key Holder_plate_1"
-    assert job["makerworld_id"] == "31879733"
+    assert job["file"] == "31879733-Key Holder_plate_1.gcode"
     assert job["planned_grams"] == 20.0
     assert job["started_at"].startswith("2026-09-24T17:32")
 
@@ -358,3 +358,15 @@ async def test_rebook_job(hass):
     assert job["total_cost"] == round(job["energy_cost"] + 17.1 * 0.01198, 4)
     job = await tracker.async_rebook(job_id, 16)                 # slicer weight
     assert job["filaments"][0]["grams"] == 20.0
+
+
+def test_meta_current_detects_stale_model_data():
+    """ha-bambulab keeps the previous model when a print starts from the SD root."""
+    from custom_components.print_cost_analyzer.tracker import _meta_current
+    assert _meta_current("Key Holder_plate_1", "31879733-Key Holder_plate_1.gcode")
+    assert _meta_current("Cathedral Lamp 3mf", "72677687-Cathedral Lamp 3mf_plate_1.gcode")
+    assert _meta_current("Biomechanical_Xenomorph_Dish_Precut.gcode.3mf",
+                         "21863866-Biomechanical Xenomorph Dish Precut.gcode")
+    assert not _meta_current("Cathedral_Lamp_150_Druckteile_plate_4.gcode.3mf",
+                             "21863866-Biomechanical Xenomorph Dish Precut.gcode")
+    assert _meta_current(None, "x.gcode") and _meta_current("x", "")
