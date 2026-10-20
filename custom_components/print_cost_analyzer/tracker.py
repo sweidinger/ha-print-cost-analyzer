@@ -501,6 +501,24 @@ class PrintTracker:
         _LOGGER.debug("%s: idle phase booked - %s s, %s kWh", printer.name, duration, energy)
         async_dispatcher_send(self.hass, SIGNAL_UPDATED)
 
+    def active_running(self) -> list[dict[str, Any]]:
+        """Running prints with the energy they have drawn so far."""
+        price = _float(_state(self.hass, self.price_entity))
+        out = []
+        for eid, job in self.active.items():
+            printer = self.printers.get(eid)
+            e0 = job.get("energy_start")
+            e1 = job.get("energy_end") or (self._energy(printer) if printer else None)
+            energy = round(e1 - e0, 4) if e0 is not None and e1 is not None and e1 >= e0 else None
+            out.append({
+                **{k: v for k, v in job.items() if k not in ("spools_start", "tags_seen")},
+                "printer": printer.name if printer else job.get("printer"),
+                "energy_kwh": energy,
+                "energy_cost": round(energy * price, 4)
+                if energy is not None and price is not None else None,
+            })
+        return out
+
     def idle_running(self) -> list[dict[str, Any]]:
         """Open idle phases with what they have drawn so far."""
         price = _float(_state(self.hass, self.price_entity))

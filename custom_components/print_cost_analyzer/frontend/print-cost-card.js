@@ -129,7 +129,7 @@ class PrintCostCard extends HTMLElement {
       ? d.idle_active.filter(j => !this._printer || j.printer === this._printer).map(j => `
       <div class="run idle"><span class="dot"></span><span><b>${this._esc(j.printer)}</b> im Leerlauf seit ${this._date(j.started_at)} · bisher ${this._num(j.energy_kwh, 3, 'kWh')} / ${this._eur(j.energy_cost)}</span></div>`).join('')
       : d.active.filter(j => !j.ended_at).map(j => `
-      <div class="run"><span class="dot"></span><b>${this._esc(j.printer)}</b> druckt „${this._esc(j.name)}“ seit ${this._date(j.started_at)}</div>`).join('');
+      <div class="run"><span class="dot"></span><b>${this._esc(j.printer)}</b> druckt „${this._esc(j.name)}“ seit ${this._date(j.started_at)}${j.energy_kwh != null ? ` · Strom bisher ${this._num(j.energy_kwh, 3, 'kWh')} / ${this._eur(j.energy_cost)}` : ''}</div>`).join('');
 
     const list = idleView ? idle : jobs;
     const rows = idleView ? idle.slice(0, this._limit).map(j => this._idleRow(j)).join('') : jobs.slice(0, this._limit).map(j => {

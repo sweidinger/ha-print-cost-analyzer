@@ -1,5 +1,10 @@
 # Changelog
 
+## [2.2.2] - 2026-10-20
+
+### Added
+- Running prints show the energy drawn so far and its cost (refreshed with the card, every minute).
+
 ## [2.2.1] - 2026-10-20
 
 ### Fixed
