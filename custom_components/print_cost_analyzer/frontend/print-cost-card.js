@@ -4,6 +4,9 @@
  * title: 3D-Druckkosten      # optional
  * page_size: 25              # optional, prints per "mehr anzeigen"
  * view: jobs                 # optional, start with "jobs" (Drucke) or "idle" (Leerlauf)
+ * reprint:                   # optional, "Erneut prüfen/drucken" for files still on the printer
+ *   script: script.bambu_druck_freigeben           # called with drucker, datei, nur_pruefen
+ *   files: sensor.bambu_print_gate_{printer}_dateien # attribute "files" (list of {name}); {printer} = lower-case name
  */
 class PrintCostCard extends HTMLElement {
   setConfig(config) {
@@ -49,11 +52,56 @@ class PrintCostCard extends HTMLElement {
     if (sw) { this._view = sw.dataset.view; this._open = null; this._limit = this._cfg.page_size; this._render(); return; }
     const more = ev.target.closest('[data-more]');
     if (more) { this._limit += this._cfg.page_size; this._render(); return; }
+    const rp = ev.target.closest('[data-rp]');
+    if (rp) { ev.stopPropagation(); this._reprint(rp.dataset.rp, rp.dataset.id); return; }
     const row = ev.target.closest('[data-job]');
-    if (row && !ev.target.closest('a')) {
+    if (row && !ev.target.closest('a') && !ev.target.closest('.rp')) {
       this._open = this._open === row.dataset.job ? null : row.dataset.job;
       this._render();
     }
+  }
+
+  // File of a booked print that is still on the printer's SD card (sent with "Senden").
+  _reprintFile(j) {
+    const rp = this._cfg.reprint;
+    if (!rp || !rp.script || !this._hass || !j.printer || !j.name) return null;
+    const ent = String(rp.files || 'sensor.bambu_print_gate_{printer}_dateien').replace('{printer}', String(j.printer).toLowerCase());
+    const files = ((this._hass.states[ent] || {}).attributes || {}).files || [];
+    const names = new Set(files.map(f => f && f.name).filter(Boolean));
+    return [j.name, `${j.name}.gcode.3mf`, `${j.name}.3mf`].find(n => names.has(n)) || null;
+  }
+
+  _reprintHtml(j) {
+    const file = this._reprintFile(j);
+    if (!file) return '';
+    const st = this._rp && this._rp.id === j.id ? this._rp : null;
+    if (st && st.stage === 'confirm') return `<span class="rp">„${this._esc(file)}“ auf ${this._esc(j.printer)} prüfen und starten?
+      <button class="rpb primary" data-rp="go" data-id="${j.id}">Ja, starten</button>
+      <button class="rpb" data-rp="cancel" data-id="${j.id}">Abbrechen</button></span>`;
+    if (st && st.stage === 'busy') return `<span class="rp">${st.start ? 'Prüfe und starte' : 'Prüfe'} „${this._esc(file)}“ …</span>`;
+    const msg = st && st.msg ? `<span class="rpmsg ${st.err ? 'bad' : ''}">${this._esc(st.msg)}</span>` : '';
+    return `<span class="rp">
+      <button class="rpb" data-rp="check" data-id="${j.id}" title="Datei liegt noch auf dem Drucker">Erneut prüfen</button>
+      <button class="rpb primary" data-rp="start" data-id="${j.id}">Erneut drucken</button>${msg}</span>`;
+  }
+
+  async _reprint(action, id) {
+    const j = ((this._data || {}).jobs || []).find(x => x.id === id);
+    const file = j && this._reprintFile(j);
+    if (!file) return;
+    if (action === 'cancel') { this._rp = null; this._render(); return; }
+    if (action === 'start') { this._rp = { id, stage: 'confirm' }; this._render(); return; }
+    const start = action === 'go';
+    this._rp = { id, stage: 'busy', start };
+    this._render();
+    const [domain, service] = String(this._cfg.reprint.script).split('.');
+    try {
+      await this._hass.callService(domain, service, { drucker: j.printer, datei: file, nur_pruefen: !start });
+      this._rp = { id, stage: 'done', msg: start ? 'Gesendet – Ergebnis per Push und im Tab Druckfreigabe.' : 'Geprüft – Ergebnis per Push und im Tab Druckfreigabe.' };
+    } catch (err) {
+      this._rp = { id, stage: 'done', err: true, msg: `Fehlgeschlagen: ${err && err.message ? err.message : err}` };
+    }
+    this._render();
   }
 
   _change(ev) {
@@ -169,7 +217,7 @@ class PrintCostCard extends HTMLElement {
             <div class="line sum"><span>Filament gesamt</span><b>${this._eur(j.filament_cost)}</b></div>
             <div class="line total2"><span>Druck gesamt</span><b>${this._eur(j.total_cost)}</b></div>
             ${notes}
-            <div class="foot"><span></span><span class="id">ID ${j.id}${j.file ? ' · ' + this._esc(j.file) : ''}</span></div>
+            <div class="foot"><span>${this._reprintHtml(j)}</span><span class="id">ID ${j.id}${j.file ? ' · ' + this._esc(j.file) : ''}</span></div>
           </div>` : ''}
         </div>`;
     }).join('');
@@ -219,6 +267,11 @@ class PrintCostCard extends HTMLElement {
         .fn { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
         .sum { border-top:1px dashed var(--divider-color); margin-top:4px; }
         .total2 { border-top:1px solid var(--divider-color); margin-top:6px; padding-top:8px; font-size:1rem; }
+        .rp { display:inline-flex; align-items:center; flex-wrap:wrap; gap:6px; color:var(--primary-text-color); font-size:.82rem; }
+        .rpb { font:inherit; font-size:.8rem; padding:4px 12px; border-radius:14px; cursor:pointer; border:1px solid var(--divider-color); background:transparent; color:var(--primary-color); }
+        .rpb.primary { background:var(--primary-color); border-color:var(--primary-color); color:var(--text-primary-color, #fff); }
+        .rpmsg { color:var(--secondary-text-color); }
+        .rpmsg.bad { color:var(--error-color, #db4437); }
         .note { font-size:.8rem; color:var(--warning-color, #e8b04a); margin-top:6px; }
         .foot { display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px; margin-top:10px; font-size:.78rem; color:var(--secondary-text-color); }
         a { color:var(--primary-color); text-decoration:none; }

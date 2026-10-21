@@ -1,5 +1,10 @@
 # Changelog
 
+## [2.2.5] - 2026-10-21
+
+### Added
+- Card option `reprint` (script + files sensor): a booked print whose file is still on the printer's SD card gets "Erneut prüfen" and "Erneut drucken" (with confirmation) in its details.
+
 ## [2.2.4] - 2026-10-21
 
 ### Changed
