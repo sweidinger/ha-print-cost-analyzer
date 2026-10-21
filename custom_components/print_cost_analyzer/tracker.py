@@ -19,6 +19,8 @@ from homeassistant.helpers.event import async_call_later, async_track_state_chan
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
+OFFLINE_GRACE_S = 600  # a print only ends after this long offline
+
 from .const import (
     ACTIVE_STATES, EVENT_JOB_FINISHED, IDLE_MIN_SECONDS, IDLE_RESUME_MINUTES, IMAGE_DIR,
     IMAGE_URL, OFF_STATES, PREP_STATES, RESULT_FAILED, RESULT_FINISHED, SIGNAL_UPDATED,
@@ -222,14 +224,20 @@ class PrintTracker:
         was = old.state if old else None
         now = new.state
         job = self.active.get(eid)
+        if job and not job.get("ended_at") and now not in OFF_STATES:
+            self._cancel_offline(eid)
         if now in ACTIVE_STATES and not job:
             # Coming back from unavailable/unknown (restart, lost connection)
             # means the print was already running: take the printer's own
             # start time and mark the job as partially observed.
             missed = was in (None, "unavailable", "unknown")
             self.hass.async_create_task(self._begin(printer, partial=missed))
+        elif job and not job.get("ended_at") and now in OFF_STATES:
+            # A printer that drops off the network for a moment (Wi-Fi, MQTT
+            # broker) keeps printing. Only end the job if it stays away.
+            self._schedule_offline(printer, job)
         elif job and not job.get("ended_at") and now not in ACTIVE_STATES \
-                and now not in ("unavailable", "unknown"):
+                and now not in OFF_STATES and now != "unknown":
             # Also from unavailable: a printer that finished while it was
             # unreachable comes back straight as 'finish'.
             self.hass.async_create_task(self._end(printer, now))
@@ -356,15 +364,43 @@ class PrintTracker:
         await self._save()
         async_dispatcher_send(hass, SIGNAL_UPDATED)
 
-    async def _end(self, printer: Printer, state: str) -> None:
+    def _schedule_offline(self, printer: Printer, job: dict[str, Any]) -> None:
+        key = f"offline:{printer.status_entity}"
+        if key in self._timers:
+            return
+        job.setdefault("offline_since", dt_util.utcnow().isoformat())
+        job.setdefault("offline_energy", self._energy(printer))
+
+        @callback
+        def _fire(_now: datetime) -> None:
+            self._timers.pop(key, None)
+            if _state(self.hass, printer.status_entity) in OFF_STATES:
+                self.hass.async_create_task(self._end(
+                    printer, "offline", ended_at=job.get("offline_since"),
+                    energy=job.get("offline_energy")))
+
+        self._timers[key] = async_call_later(self.hass, OFFLINE_GRACE_S, _fire)
+
+    def _cancel_offline(self, eid: str) -> None:
+        cancel = self._timers.pop(f"offline:{eid}", None)
+        if cancel:
+            cancel()
+        job = self.active.get(eid)
+        if job:
+            job.pop("offline_since", None)
+            job.pop("offline_energy", None)
+
+    async def _end(self, printer: Printer, state: str, ended_at: str | None = None,
+                   energy: float | None = None) -> None:
         job = self.active.get(printer.status_entity)
         if not job or job.get("ended_at"):
             return
+        self._cancel_offline(printer.status_entity)
         self._refresh_meta(printer, job, at_end=True)
-        job["ended_at"] = dt_util.utcnow().isoformat()
+        job["ended_at"] = ended_at or dt_util.utcnow().isoformat()
         job["result"] = ("finished" if state == RESULT_FINISHED
                          else "failed" if state == RESULT_FAILED else "cancelled")
-        job["energy_end"] = self._energy(printer)
+        job["energy_end"] = energy if energy is not None else self._energy(printer)
         # Titelbild nur, wenn die Modelldaten der Integration zu diesem Druck gehören
         if _meta_current(printer.sibling_state(self.hass, UID_TASK) or job.get("name"),
                          printer.sibling_state(self.hass, UID_GCODE)):
@@ -601,6 +637,28 @@ class PrintTracker:
         job["filaments"] = [_filament(str(spool_id), round(float(grams), 2), meta)]
         job["filament_source"] = "manual"
         job.update(summarize(job.get("energy_kwh"), job.get("energy_price"), job["filaments"]))
+        await self._save()
+        async_dispatcher_send(self.hass, SIGNAL_UPDATED)
+        return job
+
+    async def async_update_job(self, job_id: str, ended_at: datetime | None = None,
+                               result: str | None = None,
+                               energy_kwh: float | None = None) -> dict[str, Any]:
+        """Correct a booked print by hand: end time, result, energy."""
+        job = next((j for j in self.jobs if j.get("id") == job_id), None)
+        if job is None:
+            raise ValueError(f"Kein Druck mit ID {job_id}")
+        if ended_at is not None:
+            end = dt_util.as_utc(ended_at)
+            job["ended_at"] = end.isoformat()
+            started = dt_util.parse_datetime(job["started_at"])
+            job["duration_s"] = int((end - started).total_seconds()) if started else None
+        if result is not None:
+            job["result"] = result
+        if energy_kwh is not None:
+            job["energy_kwh"] = round(float(energy_kwh), 4)
+        job.update(summarize(job.get("energy_kwh"), job.get("energy_price"),
+                             job.get("filaments") or []))
         await self._save()
         async_dispatcher_send(self.hass, SIGNAL_UPDATED)
         return job

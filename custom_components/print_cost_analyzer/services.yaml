@@ -25,3 +25,26 @@ rebook_job:
           step: 0.1
           unit_of_measurement: g
           mode: box
+update_job:
+  fields:
+    job_id:
+      required: true
+      selector:
+        text:
+    ended_at:
+      required: false
+      selector:
+        datetime:
+    result:
+      required: false
+      selector:
+        select:
+          options: [finished, failed, cancelled]
+    energy_kwh:
+      required: false
+      selector:
+        number:
+          min: 0
+          step: 0.001
+          unit_of_measurement: kWh
+          mode: box

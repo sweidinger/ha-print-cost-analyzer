@@ -67,6 +67,28 @@
           "description": "Filament used. Defaults to the slicer's estimate."
         }
       }
+    },
+    "update_job": {
+      "name": "Correct print",
+      "description": "Correct the end time, result or energy of a booked print.",
+      "fields": {
+        "job_id": {
+          "name": "Print ID",
+          "description": "ID of the print (bottom right in the card)."
+        },
+        "ended_at": {
+          "name": "End",
+          "description": "Actual end of the print."
+        },
+        "result": {
+          "name": "Result",
+          "description": "finished, failed or cancelled."
+        },
+        "energy_kwh": {
+          "name": "Energy",
+          "description": "Energy of the print in kWh."
+        }
+      }
     }
   }
 }

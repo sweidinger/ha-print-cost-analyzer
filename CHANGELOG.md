@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.2.3] - 2026-10-21
+
+### Fixed
+- A printer that goes "offline" for a few seconds during a print (Wi-Fi/MQTT hiccup) no longer ends the job as cancelled. The job only ends after 10 minutes offline, dated to when the printer dropped off.
+
+### Added
+- Service `update_job` to correct a booked print (end time, result, energy).
+
 ## [2.2.2] - 2026-10-20
 
 ### Added

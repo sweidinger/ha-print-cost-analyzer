@@ -35,7 +35,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     await hass.http.async_register_static_paths([
         StaticPathConfig(CARD_URL, str(Path(__file__).parent / "frontend" / "print-cost-card.js"), False)
     ])
-    add_extra_js_url(hass, f"{CARD_URL}?v=2.2.2")
+    add_extra_js_url(hass, f"{CARD_URL}?v=2.2.3")
     websocket_api.async_register_command(hass, ws_jobs)
     return True
 
@@ -109,6 +109,27 @@ def _register_services(hass: HomeAssistant) -> None:
             raise HomeAssistantError(str(err)) from err
         return {k: job.get(k) for k in ("id", "filament_grams", "filament_cost", "total_cost")}
 
+    async def update_job(call: ServiceCall) -> ServiceResponse:
+        tracker = _tracker(hass)
+        if tracker is None:
+            raise HomeAssistantError("3D Print Cost Analyzer ist nicht eingerichtet")
+        try:
+            job = await tracker.async_update_job(
+                call.data["job_id"], call.data.get("ended_at"), call.data.get("result"),
+                call.data.get("energy_kwh"))
+        except ValueError as err:
+            raise HomeAssistantError(str(err)) from err
+        return {k: job.get(k) for k in ("id", "ended_at", "result", "duration_s",
+                                        "energy_kwh", "energy_cost", "total_cost")}
+
+    hass.services.async_register(DOMAIN, "update_job", update_job,
+                                 schema=vol.Schema({
+                                     vol.Required("job_id"): cv.string,
+                                     vol.Optional("ended_at"): cv.datetime,
+                                     vol.Optional("result"): vol.In(["finished", "failed", "cancelled"]),
+                                     vol.Optional("energy_kwh"): vol.All(vol.Coerce(float), vol.Range(min=0)),
+                                 }),
+                                 supports_response=SupportsResponse.OPTIONAL)
     hass.services.async_register(DOMAIN, "rebook_job", rebook_job,
                                  schema=vol.Schema({
                                      vol.Required("job_id"): cv.string,

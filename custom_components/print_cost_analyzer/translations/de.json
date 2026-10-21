@@ -67,6 +67,28 @@
           "description": "Verbrauchtes Filament. Standard ist die Slicer-Schätzung."
         }
       }
+    },
+    "update_job": {
+      "name": "Druck korrigieren",
+      "description": "Endzeit, Ergebnis oder Strom eines gebuchten Drucks von Hand korrigieren.",
+      "fields": {
+        "job_id": {
+          "name": "Druck-ID",
+          "description": "ID des Drucks (in der Karte unten rechts)."
+        },
+        "ended_at": {
+          "name": "Ende",
+          "description": "Tatsächliches Druckende."
+        },
+        "result": {
+          "name": "Ergebnis",
+          "description": "finished, failed oder cancelled."
+        },
+        "energy_kwh": {
+          "name": "Strom",
+          "description": "Verbrauch des Drucks in kWh."
+        }
+      }
     }
   }
 }
