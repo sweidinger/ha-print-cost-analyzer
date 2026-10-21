@@ -19,8 +19,6 @@ from homeassistant.helpers.event import async_call_later, async_track_state_chan
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
-OFFLINE_GRACE_S = 600  # a print only ends after this long offline
-
 from .const import (
     ACTIVE_STATES, EVENT_JOB_FINISHED, IDLE_MIN_SECONDS, IDLE_RESUME_MINUTES, IMAGE_DIR,
     IMAGE_URL, OFF_STATES, PREP_STATES, RESULT_FAILED, RESULT_FINISHED, SIGNAL_UPDATED,
@@ -224,18 +222,34 @@ class PrintTracker:
         was = old.state if old else None
         now = new.state
         job = self.active.get(eid)
-        if job and not job.get("ended_at") and now not in OFF_STATES:
-            self._cancel_offline(eid)
+        open_job = job if job and not job.get("ended_at") else None
+        offline_since = open_job.get("offline_since") if open_job else None
+        if open_job and offline_since and now in ACTIVE_STATES:
+            if self._same_task(printer, open_job):
+                # Back after an interruption (Wi-Fi, MQTT, power): the print goes on.
+                self._resume(printer, open_job)
+            else:
+                # A different print started: the interrupted one never resumed.
+                self.hass.async_create_task(self._replace_interrupted(printer, open_job))
+                return
         if now in ACTIVE_STATES and not job:
             # Coming back from unavailable/unknown (restart, lost connection)
             # means the print was already running: take the printer's own
             # start time and mark the job as partially observed.
             missed = was in (None, "unavailable", "unknown")
             self.hass.async_create_task(self._begin(printer, partial=missed))
-        elif job and not job.get("ended_at") and now in OFF_STATES:
-            # A printer that drops off the network for a moment (Wi-Fi, MQTT
-            # broker) keeps printing. Only end the job if it stays away.
-            self._schedule_offline(printer, job)
+        elif open_job and now == "offline":
+            # Offline during a print: Wi-Fi, MQTT broker or power. The printer
+            # may resume when it is back, so the job stays open ("unterbrochen")
+            # for as long as it takes - no timeout.
+            if not offline_since:
+                self._interrupt(printer, open_job)
+        elif open_job and offline_since and now not in ACTIVE_STATES \
+                and now not in (RESULT_FINISHED, RESULT_FAILED):
+            # Back but not printing (e.g. idle with "resume print?" after a power
+            # cut), or offline/unavailable again: stays interrupted. It ends as
+            # cancelled only when a different print starts.
+            pass
         elif job and not job.get("ended_at") and now not in ACTIVE_STATES \
                 and now not in OFF_STATES and now != "unknown":
             # Also from unavailable: a printer that finished while it was
@@ -364,38 +378,49 @@ class PrintTracker:
         await self._save()
         async_dispatcher_send(hass, SIGNAL_UPDATED)
 
-    def _schedule_offline(self, printer: Printer, job: dict[str, Any]) -> None:
-        key = f"offline:{printer.status_entity}"
-        if key in self._timers:
-            return
-        job.setdefault("offline_since", dt_util.utcnow().isoformat())
-        job.setdefault("offline_energy", self._energy(printer))
+    def _interrupt(self, printer: Printer, job: dict[str, Any]) -> None:
+        job["offline_since"] = dt_util.utcnow().isoformat()
+        job["offline_energy"] = self._energy(printer)
+        _LOGGER.info("%s: print interrupted (printer offline) - %s", printer.name, job.get("name"))
+        self.hass.async_create_task(self._save())
+        async_dispatcher_send(self.hass, SIGNAL_UPDATED)
 
-        @callback
-        def _fire(_now: datetime) -> None:
-            self._timers.pop(key, None)
-            if _state(self.hass, printer.status_entity) in OFF_STATES:
-                self.hass.async_create_task(self._end(
-                    printer, "offline", ended_at=job.get("offline_since"),
-                    energy=job.get("offline_energy")))
+    def _same_task(self, printer: Printer, job: dict[str, Any]) -> bool:
+        task = printer.sibling_state(self.hass, UID_TASK)
+        return not task or task in (job.get("name"), job.get("file"))
 
-        self._timers[key] = async_call_later(self.hass, OFFLINE_GRACE_S, _fire)
-
-    def _cancel_offline(self, eid: str) -> None:
-        cancel = self._timers.pop(f"offline:{eid}", None)
+    async def _replace_interrupted(self, printer: Printer, job: dict[str, Any]) -> None:
+        eid = printer.status_entity
+        await self._end(printer, "cancelled", ended_at=job.get("offline_since"),
+                        energy=job.get("offline_energy"))
+        # Book it right away so the slot is free for the new print.
+        cancel = self._timers.pop(eid, None)
         if cancel:
             cancel()
-        job = self.active.get(eid)
-        if job:
-            job.pop("offline_since", None)
-            job.pop("offline_energy", None)
+        await self._settle(eid)
+        await self._begin(printer)
+
+    def _resume(self, printer: Printer, job: dict[str, Any]) -> None:
+        since = job.pop("offline_since", None)
+        job.pop("offline_energy", None)
+        if since:
+            job.setdefault("interruptions", []).append(
+                {"from": since, "to": dt_util.utcnow().isoformat()})
+            _LOGGER.info("%s: print resumed after interruption - %s", printer.name, job.get("name"))
+        self.hass.async_create_task(self._save())
+        async_dispatcher_send(self.hass, SIGNAL_UPDATED)
 
     async def _end(self, printer: Printer, state: str, ended_at: str | None = None,
                    energy: float | None = None) -> None:
         job = self.active.get(printer.status_entity)
         if not job or job.get("ended_at"):
             return
-        self._cancel_offline(printer.status_entity)
+        since = job.pop("offline_since", None)
+        job.pop("offline_energy", None)
+        if since and ended_at is None:
+            # Finished/failed while it was unreachable: note the gap.
+            job.setdefault("interruptions", []).append(
+                {"from": since, "to": dt_util.utcnow().isoformat()})
         self._refresh_meta(printer, job, at_end=True)
         job["ended_at"] = ended_at or dt_util.utcnow().isoformat()
         job["result"] = ("finished" if state == RESULT_FINISHED
@@ -409,7 +434,9 @@ class PrintTracker:
             job["image"] = None
         if state not in OFF_STATES:
             # The printer stays on after the print: from here it is idle.
-            await self._open_idle(printer, started=job["ended_at"], energy=job["energy_end"])
+            if ended_at is None:
+                await self._open_idle(printer, started=job["ended_at"], energy=job["energy_end"])
+            # Back-dated end (interrupted print replaced by a new one): no idle phase.
         await self._save()
         self._schedule_settle(printer.status_entity)
 
@@ -444,7 +471,8 @@ class PrintTracker:
         record = {
             k: job.get(k) for k in ("id", "printer", "printer_entity", "serial", "name",
                                     "file", "started_at", "ended_at",
-                                    "result", "planned_grams", "image", "partial")
+                                    "result", "planned_grams", "image", "partial",
+                                    "interruptions")
         }
         record["printer"] = printer.name
         record.update({
@@ -549,6 +577,9 @@ class PrintTracker:
             out.append({
                 **{k: v for k, v in job.items() if k not in ("spools_start", "tags_seen")},
                 "printer": printer.name if printer else job.get("printer"),
+                "status": ("interrupted" if job.get("offline_since")
+                           else "paused" if printer and _state(self.hass, eid) == "pause"
+                           else "printing"),
                 "energy_kwh": energy,
                 "energy_cost": round(energy * price, 4)
                 if energy is not None and price is not None else None,

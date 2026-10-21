@@ -1,5 +1,11 @@
 # Changelog
 
+## [2.2.4] - 2026-10-21
+
+### Changed
+- A printer that goes offline during a print (Wi-Fi, MQTT, power cut) no longer ends the job after a timeout. The job stays open as "unterbrochen" for as long as it takes: it continues when the printer is back printing the same task, takes "finish"/"failed" as reported, stays open while the printer is back but idle (e.g. "resume print?" after a power cut), and only becomes "cancelled" (dated to the moment it dropped off) when a different print starts. Interruptions are listed on the print.
+- The card shows running prints as "druckt", "pausiert" or "unterbrochen".
+
 ## [2.2.3] - 2026-10-21
 
 ### Fixed

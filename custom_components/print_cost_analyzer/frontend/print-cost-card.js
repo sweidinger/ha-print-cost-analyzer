@@ -129,7 +129,7 @@ class PrintCostCard extends HTMLElement {
       ? d.idle_active.filter(j => !this._printer || j.printer === this._printer).map(j => `
       <div class="run idle"><span class="dot"></span><span><b>${this._esc(j.printer)}</b> im Leerlauf seit ${this._date(j.started_at)} · bisher ${this._num(j.energy_kwh, 3, 'kWh')} / ${this._eur(j.energy_cost)}</span></div>`).join('')
       : d.active.filter(j => !j.ended_at).map(j => `
-      <div class="run"><span class="dot"></span><b>${this._esc(j.printer)}</b> druckt „${this._esc(j.name)}“ seit ${this._date(j.started_at)}${j.energy_kwh != null ? ` · Strom bisher ${this._num(j.energy_kwh, 3, 'kWh')} / ${this._eur(j.energy_cost)}` : ''}</div>`).join('');
+      <div class="run ${j.status === 'interrupted' ? 'idle' : j.status === 'paused' ? 'paused' : ''}"><span class="dot"></span><b>${this._esc(j.printer)}</b> ${j.status === 'interrupted' ? `unterbrochen seit ${this._date(j.offline_since)} (Drucker offline – läuft weiter, sobald er sich zurückmeldet) ·` : j.status === 'paused' ? 'pausiert ·' : 'druckt'} „${this._esc(j.name)}“ seit ${this._date(j.started_at)}${j.energy_kwh != null ? ` · Strom bisher ${this._num(j.energy_kwh, 3, 'kWh')} / ${this._eur(j.energy_cost)}` : ''}</div>`).join('');
 
     const list = idleView ? idle : jobs;
     const rows = idleView ? idle.slice(0, this._limit).map(j => this._idleRow(j)).join('') : jobs.slice(0, this._limit).map(j => {
@@ -143,6 +143,7 @@ class PrintCostCard extends HTMLElement {
         j.filament_source === 'slicer' ? 'Filament laut Slicer – die Buchung in Spoolman fehlte oder passte nicht zum Druck.' : '',
         j.filament_source === 'manual' ? 'Filament von Hand nachgebucht.' : '',
         j.missing_price ? 'Für mindestens eine Spule fehlt der Preis in Spoolman.' : '',
+        (j.interruptions || []).length ? `Unterbrochen (Drucker offline): ${(j.interruptions || []).map(i => `${this._date(i.from)} – ${this._dur(Math.round((new Date(i.to) - new Date(i.from)) / 1000))}`).join(', ')}.` : '',
         j.partial ? 'Beginn verpasst (HA war offline) – Strom nur teilweise erfasst.' : '',
       ].filter(Boolean).map(n => `<div class="note">${n}</div>`).join('');
       return `
@@ -200,6 +201,8 @@ class PrintCostCard extends HTMLElement {
         .badge.idle { background:rgba(127,127,127,.16); }
         .thumb.idle { color:var(--secondary-text-color); }
         .run.idle { background:rgba(232,176,74,.14); }
+        .run.paused { background:rgba(88,166,255,.14); }
+        .run.paused .dot { background:#58a6ff; box-shadow:0 0 0 4px rgba(88,166,255,.25); }
         .run.idle .dot { background:#e8b04a; box-shadow:0 0 0 4px rgba(232,176,74,.25); }
         .kpi.link { cursor:pointer; } .kpi.link:hover { background:rgba(127,127,127,.14); }
         .kpi.link span::after { content:' ›'; }
