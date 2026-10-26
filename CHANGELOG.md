@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.2.6] - 2026-10-26
+
+### Fixed
+- A model sliced anew under the same name (e.g. `582305-Netzteil-Halter.gcode` → `9095559-Netzteil-Halter.gcode`) no longer keeps the previous print's file and slicer weight. At a print's start ha-bambulab still shows the last model; the fresh download replaces it seconds later, and file and planned weight now follow it. Before, the stale weight made the correct Spoolman booking look implausible and the print was costed with the old slicer weight.
+
+### Added
+- `rebook_job` takes `spools` (`{spool id: grams}`) to book a print to several spools at once; `spool_id` is now optional.
+
 ## [2.2.5] - 2026-10-21
 
 ### Added

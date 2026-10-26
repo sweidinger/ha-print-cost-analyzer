@@ -65,6 +65,10 @@
         "grams": {
           "name": "Grams",
           "description": "Filament used. Defaults to the slicer's estimate."
+        },
+        "spools": {
+          "name": "Spools",
+          "description": "Several spools at once: Spoolman ID and grams each, e.g. 20: 4.71 and 23: 47.36. Replaces spool and grams."
         }
       }
     }

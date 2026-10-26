@@ -303,7 +303,11 @@ class PrintTracker:
         """Fill in what was unknown when the job began. True if anything changed.
 
         After a restart or a lost connection the print status often comes back
-        a moment before the task name and start time do.
+        a moment before the task name and start time do. A model sliced anew
+        under the same name starts with the previous print's file and weight
+        still in the sensors; the fresh download replaces them a few seconds
+        later, so file and weight always follow the sensors while they belong
+        to this task.
         """
         changed = False
         task = printer.sibling_state(self.hass, UID_TASK)
@@ -314,13 +318,13 @@ class PrintTracker:
         if task and job.get("name") in (None, "", "Druck", job.get("file")):
             job["name"] = task
             changed = True
-        if gcode and not job.get("file"):
+        if gcode and gcode != job.get("file"):
             job["file"] = gcode
             if job.get("name") in (None, "", "Druck"):
                 job["name"] = gcode
             changed = True
         weight = _float(printer.sibling_state(self.hass, UID_WEIGHT)) if current else None
-        if weight and not job.get("planned_grams"):
+        if weight and weight != job.get("planned_grams"):
             job["planned_grams"] = weight
             changed = True
         raw = printer.sibling_state(self.hass, UID_START)
@@ -652,20 +656,33 @@ class PrintTracker:
             return None
 
     # -- maintenance -------------------------------------------------------
-    async def async_rebook(self, job_id: str, spool_id: int,
-                           grams: float | None = None) -> dict[str, Any]:
-        """Book a finished print's filament to one spool by hand."""
+    async def async_rebook(self, job_id: str, spool_id: int | None = None,
+                           grams: float | None = None,
+                           spools: dict[int, float] | None = None) -> dict[str, Any]:
+        """Book a finished print's filament by hand: to one spool (spool_id,
+        grams defaulting to the slicer's estimate) or to several (spools:
+        {spool id: grams})."""
         job = next((j for j in self.jobs if j.get("id") == job_id), None)
         if job is None:
             raise ValueError(f"Kein Druck mit ID {job_id}")
-        grams = grams if grams is not None else job.get("planned_grams")
-        if not grams or grams <= 0:
-            raise ValueError("Keine Grammzahl angegeben und keine Slicer-Schätzung vorhanden")
-        st = self.hass.states.get(f"sensor.spoolman_spool_{spool_id}")
-        meta = _spool_meta(str(spool_id), st) if st else None
-        if meta is None:
-            raise ValueError(f"Spule {spool_id} nicht in Spoolman gefunden")
-        job["filaments"] = [_filament(str(spool_id), round(float(grams), 2), meta)]
+        if spools:
+            booking = {int(k): float(v) for k, v in spools.items()}
+        elif spool_id is not None:
+            grams = grams if grams is not None else job.get("planned_grams")
+            booking = {int(spool_id): grams}
+        else:
+            raise ValueError("Spule (spool_id) oder Spulen mit Gramm (spools) angeben")
+        filaments = []
+        for sid, g in booking.items():
+            if not g or g <= 0:
+                raise ValueError(f"Keine Grammzahl für Spule {sid} angegeben und keine "
+                                 "Slicer-Schätzung vorhanden")
+            st = self.hass.states.get(f"sensor.spoolman_spool_{sid}")
+            meta = _spool_meta(str(sid), st) if st else None
+            if meta is None:
+                raise ValueError(f"Spule {sid} nicht in Spoolman gefunden")
+            filaments.append(_filament(str(sid), round(float(g), 2), meta))
+        job["filaments"] = filaments
         job["filament_source"] = "manual"
         job.update(summarize(job.get("energy_kwh"), job.get("energy_price"), job["filaments"]))
         await self._save()

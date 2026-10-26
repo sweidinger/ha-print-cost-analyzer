@@ -65,6 +65,10 @@
         "grams": {
           "name": "Gramm",
           "description": "Verbrauchtes Filament. Standard ist die Slicer-Schätzung."
+        },
+        "spools": {
+          "name": "Spulen",
+          "description": "Mehrere Spulen auf einmal: je Spoolman-ID und Gramm, z. B. 20: 4.71 und 23: 47.36. Ersetzt Spule und Gramm."
         }
       }
     },

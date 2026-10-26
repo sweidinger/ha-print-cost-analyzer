@@ -12,7 +12,7 @@ rebook_job:
       selector:
         text:
     spool_id:
-      required: true
+      required: false
       selector:
         number:
           min: 1
@@ -25,6 +25,11 @@ rebook_job:
           step: 0.1
           unit_of_measurement: g
           mode: box
+    spools:
+      required: false
+      example: '{"20": 4.71, "23": 47.36}'
+      selector:
+        object:
 update_job:
   fields:
     job_id:

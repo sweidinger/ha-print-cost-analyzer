@@ -370,3 +370,50 @@ def test_meta_current_detects_stale_model_data():
     assert not _meta_current("Cathedral_Lamp_150_Druckteile_plate_4.gcode.3mf",
                              "21863866-Biomechanical Xenomorph Dish Precut.gcode")
     assert _meta_current(None, "x.gcode") and _meta_current("x", "")
+
+
+async def test_model_sliced_anew_under_the_same_name(hass):
+    """At the start the sensors still show the previous print of the same name;
+    the fresh download replaces file and weight seconds later."""
+    _setup_printer(hass)
+    hass.states.async_set("sensor.h2d_task", "Netzteil-Halter")
+    hass.states.async_set("sensor.h2d_gcode", "582305-Netzteil-Halter.gcode.gcode")
+    hass.states.async_set("sensor.h2d_weight", "17.23")
+    _spool(hass, 20, 100.0, tag="TAGA", price=20.0)
+    tracker, _ = await _tracker(hass)
+    hass.states.async_set(STATUS, "prepare")
+    await hass.async_block_till_done()
+    job = next(iter(tracker.active.values()))
+    assert job["planned_grams"] == 17.23
+    hass.states.async_set(STATUS, "running")
+    hass.states.async_set("sensor.h2d_weight", "52.07")
+    await hass.async_block_till_done()
+    hass.states.async_set("sensor.h2d_gcode", "9095559-Netzteil-Halter.gcode.gcode")
+    await hass.async_block_till_done()
+    assert job["file"] == "9095559-Netzteil-Halter.gcode.gcode"
+    assert job["planned_grams"] == 52.07
+    _spool(hass, 20, 152.07, tag="TAGA", price=20.0)
+    hass.states.async_set(STATUS, "finish")
+    await hass.async_block_till_done()
+    await hass.async_block_till_done()
+    rec = tracker.jobs[-1]
+    assert rec["filament_source"] == "spoolman"
+    assert [(f["spool_id"], f["grams"]) for f in rec["filaments"]] == [(20, 52.07)]
+
+
+async def test_rebook_job_to_several_spools(hass):
+    _setup_printer(hass)
+    _spool(hass, 20, 100.0, price=20.0)
+    _spool(hass, 23, 300.0, price=10.0)
+    tracker, _ = await _tracker(hass)
+    hass.states.async_set(STATUS, "running")
+    await hass.async_block_till_done()
+    hass.states.async_set(STATUS, "finish")
+    await hass.async_block_till_done()
+    await hass.async_block_till_done()
+    job_id = tracker.jobs[-1]["id"]
+    job = await tracker.async_rebook(job_id, spools={"20": 4.71, 23: 47.36})
+    assert job["filament_source"] == "manual"
+    assert [(f["spool_id"], f["grams"]) for f in job["filaments"]] == [(20, 4.71), (23, 47.36)]
+    assert job["filament_grams"] == 52.07
+    assert job["filament_cost"] == round(4.71 * 0.02 + 47.36 * 0.01, 4)
