@@ -74,7 +74,7 @@
     },
     "update_job": {
       "name": "Druck korrigieren",
-      "description": "Endzeit, Ergebnis oder Strom eines gebuchten Drucks von Hand korrigieren.",
+      "description": "Endzeit, Ergebnis, Strom oder Name eines gebuchten Drucks von Hand korrigieren.",
       "fields": {
         "job_id": {
           "name": "Druck-ID",
@@ -91,6 +91,10 @@
         "energy_kwh": {
           "name": "Strom",
           "description": "Verbrauch des Drucks in kWh."
+        },
+        "name": {
+          "name": "Name",
+          "description": "Anzeigename des Drucks."
         }
       }
     }

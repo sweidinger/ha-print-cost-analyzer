@@ -42,6 +42,7 @@ UID_WEIGHT = "_print_weight"
 UID_START = "_start_time"
 UID_COVER = "_cover_image"
 UID_ACTIVE_TRAY = "_active_tray"
+UID_OBJECTS = "_printable_objects"
 
 IMAGE_DIR = "www/print_cost_analyzer"
 IMAGE_URL = "/local/print_cost_analyzer"

@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.2.7] - 2026-10-28
+
+### Fixed
+- A print from a project that was never saved in Bambu Studio is no longer listed under the process preset name (e.g. `0.2mm layer, 2 walls, 15% infill`). The name now comes from the objects on the plate (ha-bambulab "Druckbare Objekte"), without file extension; Meshy exports (`Meshy_AI_<Name>_<Nr>_generate.stl`) are shortened to the model name. Up to three different objects are listed, more as "+n".
+
+### Added
+- `update_job` takes `name` to rename a booked print.
+
 ## [2.2.6] - 2026-10-26
 
 ### Fixed

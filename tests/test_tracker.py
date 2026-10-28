@@ -417,3 +417,55 @@ async def test_rebook_job_to_several_spools(hass):
     assert [(f["spool_id"], f["grams"]) for f in job["filaments"]] == [(20, 4.71), (23, 47.36)]
     assert job["filament_grams"] == 52.07
     assert job["filament_cost"] == round(4.71 * 0.02 + 47.36 * 0.01, 4)
+
+
+def test_objects_title():
+    from custom_components.print_cost_analyzer.tracker import _generic_task, _objects_title
+    assert _generic_task("0.2mm layer, 2 walls, 15% infill")
+    assert _generic_task("0.20mm Standard @BBL H2D")
+    assert not _generic_task("Netzteil-Halter_plate_2") and not _generic_task(None)
+    assert _objects_title({"2496": "Meshy_AI_Spooky Tug of War_1791611191_generate.stl_A"}) \
+        == "Spooky Tug of War"
+    assert _objects_title({"1": "Cube.stl", "2": "Cube.stl", "3": "Key_Holder.3mf"}) \
+        == "Cube, Key Holder"
+    assert _objects_title({str(i): f"T{i}.stl" for i in range(5)}) == "T0, T1, T2 +2"
+    assert _objects_title({}) is None and _objects_title(None) is None
+
+
+async def test_unsaved_project_is_named_after_its_objects(hass):
+    """Bambu Studio names an unsaved project after its process preset."""
+    _setup_printer(hass)
+    ent = er.async_get(hass)
+    dev = next(iter(dr.async_get(hass).devices.values()))
+    ent.async_get_or_create("sensor", "bambu_lab", SERIAL + "_printable_objects",
+                            suggested_object_id="h2d_objects", device_id=dev.id)
+    hass.states.async_set("sensor.h2d_task", "0.2mm layer, 2 walls, 15% infill")
+    hass.states.async_set("sensor.h2d_gcode", "16425208-0.2mm layer, 2 walls, 15% infill.gcode.gcode")
+    hass.states.async_set("sensor.h2d_objects", "1",
+                          {"objects": {"9": "Old_Model.stl"}})
+    _spool(hass, 20, 100.0, tag="TAGA", price=20.0)
+    tracker, _ = await _tracker(hass)
+    hass.states.async_set(STATUS, "prepare")
+    await hass.async_block_till_done()
+    job = next(iter(tracker.active.values()))
+    assert job["task"] == "0.2mm layer, 2 walls, 15% infill"
+    # The fresh model download replaces the objects a moment later.
+    hass.states.async_set("sensor.h2d_objects", "1",
+                          {"objects": {"2496": "Meshy_AI_Spooky Tug of War_1791611191_generate.stl_A"}})
+    await hass.async_block_till_done()
+    assert job["name"] == "Spooky Tug of War"
+    # Offline and back with the same task: the print continues.
+    hass.states.async_set(STATUS, "running")
+    await hass.async_block_till_done()
+    hass.states.async_set(STATUS, "offline")
+    await hass.async_block_till_done()
+    hass.states.async_set(STATUS, "running")
+    await hass.async_block_till_done()
+    assert not job.get("offline_since")
+    _spool(hass, 20, 120.0, tag="TAGA", price=20.0)
+    hass.states.async_set(STATUS, "finish")
+    await hass.async_block_till_done()
+    await hass.async_block_till_done()
+    assert tracker.jobs[-1]["name"] == "Spooky Tug of War"
+    await tracker.async_update_job(tracker.jobs[-1]["id"], name="Tauziehen")
+    assert tracker.jobs[-1]["name"] == "Tauziehen"

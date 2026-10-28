@@ -74,7 +74,7 @@
     },
     "update_job": {
       "name": "Correct print",
-      "description": "Correct the end time, result or energy of a booked print.",
+      "description": "Correct the end time, result, energy or name of a booked print.",
       "fields": {
         "job_id": {
           "name": "Print ID",
@@ -91,6 +91,10 @@
         "energy_kwh": {
           "name": "Energy",
           "description": "Energy of the print in kWh."
+        },
+        "name": {
+          "name": "Name",
+          "description": "Display name of the print."
         }
       }
     }

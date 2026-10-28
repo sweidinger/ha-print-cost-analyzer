@@ -22,8 +22,8 @@ from homeassistant.util import dt as dt_util
 from .const import (
     ACTIVE_STATES, EVENT_JOB_FINISHED, IDLE_MIN_SECONDS, IDLE_RESUME_MINUTES, IMAGE_DIR,
     IMAGE_URL, OFF_STATES, PREP_STATES, RESULT_FAILED, RESULT_FINISHED, SIGNAL_UPDATED,
-    STORAGE_KEY, STORAGE_VERSION, UID_ACTIVE_TRAY, UID_COVER, UID_GCODE, UID_START,
-    UID_STATUS, UID_TASK, UID_WEIGHT,
+    STORAGE_KEY, STORAGE_VERSION, UID_ACTIVE_TRAY, UID_COVER, UID_GCODE, UID_OBJECTS,
+    UID_START, UID_STATUS, UID_TASK, UID_WEIGHT,
 )
 from .costs import (
     price_per_gram, split_grams, spool_usage, spoolman_plausible, summarize, to_kwh,
@@ -54,6 +54,42 @@ def _meta_current(task: str | None, gcode: str | None) -> bool:
     return a in b or b in a
 
 
+# Bambu Studio names a project that was never saved after its process preset
+# ("0.2mm layer, 2 walls, 15% infill", "0.20mm Standard @BBL H2D").
+_GENERIC_TASK_RE = re.compile(r"^\s*(\d+(?:[.,]\d+)?\s*mm\b|untitled\b|unbenannt\b)", re.I)
+_MODEL_EXT_RE = re.compile(r"\.(stl|3mf|obj|step|stp|amf)(?![a-z0-9]).*$", re.I)
+_MESHY_RE = re.compile(r"^Meshy_AI_(.+?)_\d{6,}_generate$", re.I)
+
+
+def _generic_task(name: str | None) -> bool:
+    """True if the task name says nothing about the model (preset name)."""
+    return bool(name) and bool(_GENERIC_TASK_RE.match(name))
+
+
+def _object_title(raw: Any) -> str:
+    """'Meshy_AI_Spooky Tug of War_1791611191_generate.stl_A' -> 'Spooky Tug of War'."""
+    s = _MODEL_EXT_RE.sub("", str(raw or "")).strip()
+    m = _MESHY_RE.match(s)
+    if m:
+        s = m.group(1)
+    return re.sub(r"\s+", " ", s.replace("_", " ")).strip()
+
+
+def _objects_title(objects: Any) -> str | None:
+    """Name of a print from the objects on its plate (ha-bambulab 'printable objects')."""
+    if not isinstance(objects, dict):
+        return None
+    names: list[str] = []
+    for raw in objects.values():
+        title = _object_title(raw)
+        if title and title not in names:
+            names.append(title)
+    if not names:
+        return None
+    more = f" +{len(names) - 3}" if len(names) > 3 else ""
+    return ", ".join(names[:3]) + more
+
+
 class Printer:
     """One tracked printer, resolved from its ha-bambulab print-status entity."""
 
@@ -71,7 +107,7 @@ class Printer:
             self.serial = entry.unique_id[: -len(UID_STATUS)]
             self.device_id = entry.device_id
             for suffix in (UID_TASK, UID_GCODE, UID_WEIGHT, UID_START, UID_COVER,
-                           UID_ACTIVE_TRAY):
+                           UID_ACTIVE_TRAY, UID_OBJECTS):
                 domain = "image" if suffix == UID_COVER else "sensor"
                 eid = ent_reg.async_get_entity_id(domain, entry.platform,
                                                   self.serial + suffix)
@@ -90,6 +126,11 @@ class Printer:
         if st is None or st.state in ("unknown", "unavailable", ""):
             return None
         return st.state
+
+    def sibling_attr(self, hass: HomeAssistant, suffix: str, attr: str) -> Any:
+        eid = self.siblings.get(suffix)
+        st = hass.states.get(eid) if eid else None
+        return st.attributes.get(attr) if st is not None else None
 
     def tray_tags(self, hass: HomeAssistant) -> set[str]:
         """Bambu spool ids currently loaded in this printer's AMS/external slots."""
@@ -148,7 +189,8 @@ class PrintTracker:
             self.hass, list(self.printers), self._on_status))
         self._meta_owner = {
             p.siblings[k]: eid for eid, p in self.printers.items()
-            for k in (UID_TASK, UID_GCODE, UID_WEIGHT, UID_START) if k in p.siblings
+            for k in (UID_TASK, UID_GCODE, UID_WEIGHT, UID_START, UID_OBJECTS)
+            if k in p.siblings
         }
         if self._meta_owner:
             self._unsubs.append(async_track_state_change_event(
@@ -312,12 +354,20 @@ class PrintTracker:
         changed = False
         task = printer.sibling_state(self.hass, UID_TASK)
         gcode = printer.sibling_state(self.hass, UID_GCODE)
-        current = _meta_current(task or job.get("name"), gcode)
+        current = _meta_current(task or job.get("task") or job.get("name"), gcode)
         if not current:
             gcode = None
+        if task and not job.get("task"):
+            job["task"] = task
+            changed = True
         if task and job.get("name") in (None, "", "Druck", job.get("file")):
             job["name"] = task
             changed = True
+        if current:
+            title = self._title(printer, job.get("task") or job.get("name"))
+            if title and title != job.get("name"):
+                job["name"] = title
+                changed = True
         if gcode and gcode != job.get("file"):
             job["file"] = gcode
             if job.get("name") in (None, "", "Druck"):
@@ -365,7 +415,8 @@ class PrintTracker:
             "printer": printer.name,
             "printer_entity": printer.status_entity,
             "serial": printer.serial,
-            "name": task or gcode or "Druck",
+            "name": (self._title(printer, task) if current else None) or task or gcode or "Druck",
+            "task": task,
             "file": gcode,
             "started_at": started.isoformat(),
             "planned_grams": _float(printer.sibling_state(hass, UID_WEIGHT)) if current else None,
@@ -391,7 +442,14 @@ class PrintTracker:
 
     def _same_task(self, printer: Printer, job: dict[str, Any]) -> bool:
         task = printer.sibling_state(self.hass, UID_TASK)
-        return not task or task in (job.get("name"), job.get("file"))
+        return not task or task in (job.get("task"), job.get("name"), job.get("file"))
+
+    def _title(self, printer: Printer, task: str | None) -> str | None:
+        """A readable name when the task is only Bambu Studio's preset name:
+        the objects on the plate. Only call it while the model data is current."""
+        if not _generic_task(task):
+            return None
+        return _objects_title(printer.sibling_attr(self.hass, UID_OBJECTS, "objects"))
 
     async def _replace_interrupted(self, printer: Printer, job: dict[str, Any]) -> None:
         eid = printer.status_entity
@@ -431,7 +489,8 @@ class PrintTracker:
                          else "failed" if state == RESULT_FAILED else "cancelled")
         job["energy_end"] = energy if energy is not None else self._energy(printer)
         # Titelbild nur, wenn die Modelldaten der Integration zu diesem Druck gehören
-        if _meta_current(printer.sibling_state(self.hass, UID_TASK) or job.get("name"),
+        if _meta_current(printer.sibling_state(self.hass, UID_TASK) or job.get("task")
+                         or job.get("name"),
                          printer.sibling_state(self.hass, UID_GCODE)):
             job["image"] = await self._save_cover(printer, job["id"])
         else:
@@ -691,11 +750,14 @@ class PrintTracker:
 
     async def async_update_job(self, job_id: str, ended_at: datetime | None = None,
                                result: str | None = None,
-                               energy_kwh: float | None = None) -> dict[str, Any]:
-        """Correct a booked print by hand: end time, result, energy."""
+                               energy_kwh: float | None = None,
+                               name: str | None = None) -> dict[str, Any]:
+        """Correct a booked print by hand: end time, result, energy, name."""
         job = next((j for j in self.jobs if j.get("id") == job_id), None)
         if job is None:
             raise ValueError(f"Kein Druck mit ID {job_id}")
+        if name is not None and name.strip():
+            job["name"] = name.strip()
         if ended_at is not None:
             end = dt_util.as_utc(ended_at)
             job["ended_at"] = end.isoformat()

@@ -117,10 +117,10 @@ def _register_services(hass: HomeAssistant) -> None:
         try:
             job = await tracker.async_update_job(
                 call.data["job_id"], call.data.get("ended_at"), call.data.get("result"),
-                call.data.get("energy_kwh"))
+                call.data.get("energy_kwh"), call.data.get("name"))
         except ValueError as err:
             raise HomeAssistantError(str(err)) from err
-        return {k: job.get(k) for k in ("id", "ended_at", "result", "duration_s",
+        return {k: job.get(k) for k in ("id", "name", "ended_at", "result", "duration_s",
                                         "energy_kwh", "energy_cost", "total_cost")}
 
     hass.services.async_register(DOMAIN, "update_job", update_job,
@@ -129,6 +129,7 @@ def _register_services(hass: HomeAssistant) -> None:
                                      vol.Optional("ended_at"): cv.datetime,
                                      vol.Optional("result"): vol.In(["finished", "failed", "cancelled"]),
                                      vol.Optional("energy_kwh"): vol.All(vol.Coerce(float), vol.Range(min=0)),
+                                     vol.Optional("name"): cv.string,
                                  }),
                                  supports_response=SupportsResponse.OPTIONAL)
     hass.services.async_register(DOMAIN, "rebook_job", rebook_job,
